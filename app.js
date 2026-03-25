@@ -261,53 +261,86 @@ window.addEventListener('popstate', function(event) {
 // 🌐 MÓDULO: 07_Js_Api.html (PONTE FRONT-BACK)
 // =======================================================
 
+/**
+ * 📡 Api_buscarDados
+ * Gerencia a busca de dados no servidor com suporte a Sincronização em Background,
+ * Proteção de Optimistic UI e Gerenciamento de Cache Offline.
+ */
 function Api_buscarDados(isBackgroundSync = false) {
-  const overlay = document.getElementById('loading-overlay');
+  const overlay = document.getElementById('loading-overlay'); // [cite: 67, 147]
+  
+  // 1. Controle visual: só exibe o carregamento se não for uma atualização silenciosa [cite: 282, 283]
   if (!isBackgroundSync && overlay) {
     overlay.style.display = 'flex';
   }
 
   google.script.run
     .withSuccessHandler(dados => {
+      // Guarda uma cópia de segurança de todos os dados recebidos [cite: 284]
       try { localStorage.setItem('CACHE_VIAGENS', JSON.stringify(dados)); } catch(e) {}
       
+      // Atualiza as configurações globais do app [cite: 269, 284]
       ESTADO_APP.config.viagens = dados.viagens;
       ESTADO_APP.config.viagensInfo = dados.viagensInfo;
       ESTADO_APP.config.categoriasRoteiro = dados.categoriasRoteiro;
       ESTADO_APP.config.categoriasChecklist = dados.categoriasChecklist; 
 
-      // 🛡️ PROTEÇÃO OPTIMISTIC UI: Se há fila pendente offline, preservamos a tua tela local!
-      const filaPendente = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
+      /**
+       * 🛡️ PROTEÇÃO OPTIMISTIC UI (CRÍTICO)
+       * Se o usuário criou gastos ou atividades offline, eles estão na FILA_SYNC_VIAGENS.
+       * Não podemos deixar que os dados "limpos" do servidor apaguem o que o usuário 
+       * acabou de lançar no celular[cite: 10, 11, 12].
+       */
+      const filaPendente = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]'); // [cite: 78, 1019]
+      
       if (filaPendente.length > 0) {
-         const cacheLocal = localStorage.getItem('DADOS_VIAGEM_CACHE');
-         if (cacheLocal) ESTADO_APP.dadosBD = JSON.parse(cacheLocal);
-         else ESTADO_APP.dadosBD = dados.bd;
+         // Se há itens esperando para subir, mantemos a nossa versão local da "verdade" [cite: 12, 845]
+         const cacheLocalInterativo = localStorage.getItem('DADOS_VIAGEM_CACHE');
+         if (cacheLocalInterativo) {
+            ESTADO_APP.dadosBD = JSON.parse(cacheLocalInterativo);
+         } else {
+            ESTADO_APP.dadosBD = dados.bd;
+         }
       } else {
+         // Se a fila está vazia, o servidor é a fonte da verdade mais atualizada [cite: 284]
          ESTADO_APP.dadosBD = dados.bd;
-         // Guarda a base limpa para referência futura
+         // Sincroniza o cache local com a versão limpa do servidor [cite: 12]
          localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(dados.bd)); 
       }
 
+      // Define a viagem ativa caso ainda não tenha sido selecionada [cite: 284]
       if (!ESTADO_APP.viagemAtual && dados.viagens.length > 0) {
         ESTADO_APP.viagemAtual = dados.viagens[0];
         localStorage.setItem('VIAGEM_ATIVA', ESTADO_APP.viagemAtual);
       }
 
+      // Atualiza todas as telas (Roteiro, Gastos, Mala) instantaneamente [cite: 284, 306]
       UI_renderizarInterface();
 
-      if (!isBackgroundSync && overlay) overlay.style.display = 'none';
+      // Esconde o overlay caso ele tenha sido exibido [cite: 284]
+      if (overlay) overlay.style.display = 'none';
     })
     .withFailureHandler(err => {
-      if (!isBackgroundSync && overlay) overlay.style.display = 'none';
+      // 🛡️ Blindagem contra erros de rede/offline [cite: 285]
+      if (overlay) overlay.style.display = 'none';
       
-      // 🌟 SILÊNCIO: Só mostra a mensagem se a atualização foi pedida manualmente
+      /**
+       * 🌟 SILÊNCIO: Se falhar em background (ex: Wi-Fi oscilou), não incomodamos o usuário.
+       * Só mostramos o alerta se ele clicou propositalmente em "Atualizar"[cite: 20, 285].
+       */
       if (!isBackgroundSync) {
-        Swal.fire('Modo Offline', 'Não foi possível conectar. Carregando dados salvos...', 'info');
+        Swal.fire({
+          title: 'Modo Offline',
+          text: 'Não foi possível conectar ao servidor. Exibindo dados salvos no aparelho.',
+          icon: 'info',
+          confirmButtonColor: 'var(--accent)' // [cite: 19, 128]
+        });
       }
       
+      // Tenta recuperar o que for possível do armazenamento local [cite: 285, 286]
       Api_carregarDoCacheOffline(isBackgroundSync);
     })
-    .Viagens_getDadosIniciais();
+    .Viagens_getDadosIniciais(); // [cite: 35, 200]
 }
 
 function Api_carregarDoCacheOffline(isBackgroundSync = false) {
@@ -2704,7 +2737,6 @@ function Gasto_salvar() {
   const vinculoSelecionado = document.getElementById('gasto-vinculo').value;
   const idEdicao = document.getElementById('gasto-id').value;
 
-  // Validação básica obrigatória
   if (!valorStr || !descricao || !categoria) {
     return Swal.fire('Opa!', 'Preencha o Valor, a Descrição e a Categoria.', 'warning');
   }
@@ -2721,9 +2753,8 @@ function Gasto_salvar() {
     if (atividadePai && atividadePai['Data_Hora']) dataFinal = atividadePai['Data_Hora'].split(' ')[0];
   }
 
-  // 1. GERAÇÃO DE ID E PAYLOAD (Optimistic UI)
   const isNovo = (!idEdicao || idEdicao === '');
-  const idFinal = isNovo ? 'temp_gasto_' + new Date().getTime() : idEdicao; // ID Provisório [cite: 10]
+  const idFinal = isNovo ? 'temp_gasto_' + new Date().getTime() : idEdicao;
 
   const payload = {
     ID: idFinal,
@@ -2734,43 +2765,39 @@ function Gasto_salvar() {
     Titulo_Descricao: descricao, 
     Categoria: categoria, 
     Valor: valorMatematico, 
-    Localizacao: "", 
-    Anotacoes: "", 
-    Anexos: "", 
-    Links: "", 
-    Enderecos: "", 
     Atividade_Vinculada: vinculoSelecionado, 
     Usuario: "Admin",
-    Integridade: 'Pendente' // Flag visual de sincronização [cite: 11]
+    Integridade: 'Pendente'
   };
 
-  // 2. ATUALIZAÇÃO IMEDIATA DA MEMÓRIA (Zero Latência)
+  // 🛡️ PASSO 1: ATUALIZAÇÃO IMEDIATA (Optimistic UI)
   if (isNovo) {
-    ESTADO_APP.dadosBD.push(payload); [cite: 11]
+    ESTADO_APP.dadosBD.push(payload); [cite: 1890]
   } else {
-    const index = ESTADO_APP.dadosBD.findIndex(i => String(i.ID) === String(idFinal));
+    const index = ESTADO_APP.dadosBD.findIndex(i => String(i.ID) === String(idFinal)); [cite: 1891]
     if (index > -1) ESTADO_APP.dadosBD[index] = payload;
   }
 
-  // 3. BACKUP NO CACHE LOCAL (Evita rollbacks no refresh) 
-  localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(ESTADO_APP.dadosBD));
+  // 🛡️ PASSO 2: SALVAR NO CACHE (Evita perda de dados ao recarregar)
+  localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(ESTADO_APP.dadosBD)); [cite: 1892]
 
-  // 4. FECHAMENTO DO MODAL E RE-RENDERIZAÇÃO DA TELA 
-  Gasto_fecharModal(); // Esta função deve chamar App_FecharTela() internamente
+  // 🛡️ PASSO 3: FECHAR MODAL E RENDERIZAR TELA (A mágica acontece aqui)
+  Gasto_fecharModal(); [cite: 1894]
   if (typeof UI_renderizarGastos === 'function') UI_renderizarGastos(); 
   if (typeof UI_renderizarRoteiro === 'function') UI_renderizarRoteiro();
 
-  // 5. FEEDBACK TÁTIL E VISUAL
+  // 🛡️ PASSO 4: FEEDBACK VISUAL
   Swal.fire({ title: 'Salvo localmente!', icon: 'success', toast: true, position: 'top-end', timer: 1500, showConfirmButton: false });
-  if (typeof UI_vibrar === 'function') UI_vibrar(20); [cite: 302]
+  if (typeof UI_vibrar === 'function') UI_vibrar(20);
 
-  // 6. DISPARO PARA O SERVIDOR (O Proxy intercepta se estiver offline) [cite: 14, 1013]
+  // 🛡️ PASSO 5: SINCRONIZAÇÃO EM BACKGROUND (Usa o Proxy Mágico)
+  // Removemos o SyncAPP_adicionarAcao que estava a causar o erro!
   google.script.run
     .withSuccessHandler(() => {
-       console.log("Servidor atualizado.");
-       Api_buscarDados(true); // Limpa o status 'Pendente' silenciosamente
+       console.log("Sincronizado!");
+       Api_buscarDados(true); // Limpa a flag 'Pendente' silenciosamente [cite: 1332]
     })
-    .withFailureHandler(err => console.warn("Ação em fila offline:", err))
+    .withFailureHandler(err => console.warn("Offline: Ação guardada na fila.")) [cite: 2063]
     .Viagens_salvarRegistro(payload, []);
 }
 
