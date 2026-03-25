@@ -2695,8 +2695,7 @@ function Gasto_mascararValor(input) {
 
 /**
  * 🚀 Gasto_salvar (VERSÃO PWA NATIVA / LOCAL-FIRST)
- * Salva na memória, grava no cache para evitar rollbacks, atualiza a tela na hora 
- * e envia para a fila oculta do Motor de Sincronização!
+ * Estabilizada: UI imediata e integração nativa com o Proxy de Sincronização.
  */
 function Gasto_salvar() {
   const valorStr = document.getElementById('gasto-valor').value;
@@ -2705,19 +2704,26 @@ function Gasto_salvar() {
   const vinculoSelecionado = document.getElementById('gasto-vinculo').value;
   const idEdicao = document.getElementById('gasto-id').value;
 
-  if (!valorStr || !descricao || !categoria) return Swal.fire('Opa!', 'Preencha o Valor, a Descrição e a Categoria.', 'warning');
+  // Validação básica obrigatória
+  if (!valorStr || !descricao || !categoria) {
+    return Swal.fire('Opa!', 'Preencha o Valor, a Descrição e a Categoria.', 'warning');
+  }
 
   const valorMatematico = parseFloat(valorStr.replace(/\./g, "").replace(",", ".")) || 0;
 
   let dataFinal = document.getElementById('gasto-data').value;
   if (vinculoSelecionado) {
-    const atividadePai = ESTADO_APP.dadosBD.find(i => i['Viagem'] === ESTADO_APP.viagemAtual && i['Tipo_Registro'] === 'Atividade' && i['Titulo_Descricao'] === vinculoSelecionado);
+    const atividadePai = ESTADO_APP.dadosBD.find(i => 
+      i['Viagem'] === ESTADO_APP.viagemAtual && 
+      i['Tipo_Registro'] === 'Atividade' && 
+      i['Titulo_Descricao'] === vinculoSelecionado
+    );
     if (atividadePai && atividadePai['Data_Hora']) dataFinal = atividadePai['Data_Hora'].split(' ')[0];
   }
 
-  // 🌟 MENTORIA: Identificar se é um gasto novo ou uma edição
+  // 1. GERAÇÃO DE ID E PAYLOAD (Optimistic UI)
   const isNovo = (!idEdicao || idEdicao === '');
-  const idFinal = isNovo ? 'temp_gasto_' + new Date().getTime() : idEdicao;
+  const idFinal = isNovo ? 'temp_gasto_' + new Date().getTime() : idEdicao; // ID Provisório [cite: 10]
 
   const payload = {
     ID: idFinal,
@@ -2735,43 +2741,78 @@ function Gasto_salvar() {
     Enderecos: "", 
     Atividade_Vinculada: vinculoSelecionado, 
     Usuario: "Admin",
-    Integridade: 'Pendente' // Flag para a UI saber que é um dado local
+    Integridade: 'Pendente' // Flag visual de sincronização [cite: 11]
   };
 
-  // 🌟 PASSO 1: OPTIMISTIC UI - Atualizar a memória do celular imediatamente!
+  // 2. ATUALIZAÇÃO IMEDIATA DA MEMÓRIA (Zero Latência)
   if (isNovo) {
-    ESTADO_APP.dadosBD.push(payload);
+    ESTADO_APP.dadosBD.push(payload); [cite: 11]
   } else {
-    const index = ESTADO_APP.dadosBD.findIndex(i => i['ID'] === idFinal);
+    const index = ESTADO_APP.dadosBD.findIndex(i => String(i.ID) === String(idFinal));
     if (index > -1) ESTADO_APP.dadosBD[index] = payload;
   }
 
-  // 🌟 PASSO 2: Salvar no Cache Principal do teu App para evitar rollbacks!
-  // Isso impede que o Service Worker ou o Proxy Offline desfaçam nossa alteração.
+  // 3. BACKUP NO CACHE LOCAL (Evita rollbacks no refresh) 
   localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(ESTADO_APP.dadosBD));
 
-  // 🌟 PASSO 3: Fechar o Modal e Atualizar as DUAS Telas!
-  Gasto_fecharModal();
+  // 4. FECHAMENTO DO MODAL E RE-RENDERIZAÇÃO DA TELA 
+  Gasto_fecharModal(); // Esta função deve chamar App_FecharTela() internamente
   if (typeof UI_renderizarGastos === 'function') UI_renderizarGastos(); 
   if (typeof UI_renderizarRoteiro === 'function') UI_renderizarRoteiro();
 
-  // 🌟 PASSO 4: Feedback Imediato ao Utilizador
-  Swal.fire({ title: 'Pronto!', icon: 'success', toast: true, position: 'top-end', timer: 1500, showConfirmButton: false });
-  if (typeof UI_vibrar === 'function') UI_vibrar(20);
+  // 5. FEEDBACK TÁTIL E VISUAL
+  Swal.fire({ title: 'Salvo localmente!', icon: 'success', toast: true, position: 'top-end', timer: 1500, showConfirmButton: false });
+  if (typeof UI_vibrar === 'function') UI_vibrar(20); [cite: 302]
 
-  // 🌟 PASSO 5: Entregar ao Motor de Sincronização Mágico (Proxy PWA)
-  // Substituímos o SyncAPP_adicionarAcao pelo google.script.run. O teu proxy interceta isto!
+  // 6. DISPARO PARA O SERVIDOR (O Proxy intercepta se estiver offline) [cite: 14, 1013]
   google.script.run
     .withSuccessHandler(() => {
-       // Se tem internet, atualiza o cache silenciosamente e remove o status 'Pendente'
-       Api_buscarDados(true);
+       console.log("Servidor atualizado.");
+       Api_buscarDados(true); // Limpa o status 'Pendente' silenciosamente
     })
-    .withFailureHandler((err) => {
-       // Se não tem internet, o Proxy já mostrou o aviso de "Salvo no Aparelho" 
-       // e colocou na FILA_SYNC_VIAGENS. Ignoramos o erro aqui para não travar a tela.
-       console.log("Sem internet. Ação guardada na fila offline.");
-    })
+    .withFailureHandler(err => console.warn("Ação em fila offline:", err))
     .Viagens_salvarRegistro(payload, []);
+}
+
+/**
+ * 🚀 Gasto_excluirGasto (VERSÃO LOCAL-FIRST)
+ * Remove da tela instantaneamente, mesmo sem rede.
+ */
+function Gasto_excluirGasto() {
+  const id = document.getElementById('gasto-id').value;
+  if (!id) return;
+
+  Swal.fire({
+    title: 'Excluir Gasto?', 
+    text: "O valor será removido localmente e sincronizado depois.", 
+    icon: 'warning', 
+    showCancelButton: true, 
+    confirmButtonColor: '#e74c3c', 
+    confirmButtonText: 'Sim, excluir!', 
+    cancelButtonText: 'Cancelar'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      
+      // 1. REMOÇÃO OTIMISTA DA MEMÓRIA [cite: 11]
+      ESTADO_APP.dadosBD = ESTADO_APP.dadosBD.filter(i => String(i.ID) !== String(id));
+      localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(ESTADO_APP.dadosBD)); [cite: 12]
+
+      // 2. ATUALIZAÇÃO DA UI IMEDIATA
+      Gasto_fecharModal(); 
+      if (typeof UI_renderizarGastos === 'function') UI_renderizarGastos(); 
+      if (typeof UI_renderizarRoteiro === 'function') UI_renderizarRoteiro();
+
+      // 3. FEEDBACK
+      Swal.fire({ title: 'Excluído!', icon: 'success', toast: true, position: 'top-end', timer: 2000, showConfirmButton: false });
+      if (typeof UI_vibrar === 'function') UI_vibrar(20);
+
+      // 4. COMANDO PARA O SERVIDOR
+      google.script.run
+        .withSuccessHandler(() => Api_buscarDados(true))
+        .withFailureHandler(err => console.warn("Exclusão em fila offline"))
+        .Viagens_excluirRegistro(id); [cite: 243]
+    }
+  });
 }
 
 
