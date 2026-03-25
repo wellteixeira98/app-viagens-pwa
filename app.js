@@ -274,8 +274,19 @@ function Api_buscarDados(isBackgroundSync = false) {
       ESTADO_APP.config.viagens = dados.viagens;
       ESTADO_APP.config.viagensInfo = dados.viagensInfo;
       ESTADO_APP.config.categoriasRoteiro = dados.categoriasRoteiro;
-      ESTADO_APP.config.categoriasChecklist = dados.categoriasChecklist; // 🌟 Gravando na memória
-      ESTADO_APP.dadosBD = dados.bd;
+      ESTADO_APP.config.categoriasChecklist = dados.categoriasChecklist; 
+
+      // 🛡️ PROTEÇÃO OPTIMISTIC UI: Se há fila pendente offline, preservamos a tua tela local!
+      const filaPendente = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
+      if (filaPendente.length > 0) {
+         const cacheLocal = localStorage.getItem('DADOS_VIAGEM_CACHE');
+         if (cacheLocal) ESTADO_APP.dadosBD = JSON.parse(cacheLocal);
+         else ESTADO_APP.dadosBD = dados.bd;
+      } else {
+         ESTADO_APP.dadosBD = dados.bd;
+         // Guarda a base limpa para referência futura
+         localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(dados.bd)); 
+      }
 
       if (!ESTADO_APP.viagemAtual && dados.viagens.length > 0) {
         ESTADO_APP.viagemAtual = dados.viagens[0];
@@ -288,24 +299,40 @@ function Api_buscarDados(isBackgroundSync = false) {
     })
     .withFailureHandler(err => {
       if (!isBackgroundSync && overlay) overlay.style.display = 'none';
-      Swal.fire('Modo Offline', 'Não foi possível conectar. Carregando dados salvos...', 'info');
-      Api_carregarDoCacheOffline();
+      
+      // 🌟 SILÊNCIO: Só mostra a mensagem se a atualização foi pedida manualmente
+      if (!isBackgroundSync) {
+        Swal.fire('Modo Offline', 'Não foi possível conectar. Carregando dados salvos...', 'info');
+      }
+      
+      Api_carregarDoCacheOffline(isBackgroundSync);
     })
     .Viagens_getDadosIniciais();
 }
 
-function Api_carregarDoCacheOffline() {
-  const cache = localStorage.getItem('CACHE_VIAGENS');
-  if (cache) {
-    const dados = JSON.parse(cache);
+function Api_carregarDoCacheOffline(isBackgroundSync = false) {
+  const cacheBase = localStorage.getItem('CACHE_VIAGENS'); // O que veio do servidor
+  const cacheLocal = localStorage.getItem('DADOS_VIAGEM_CACHE'); // O que tu mexeste no telemóvel
+
+  if (cacheBase) {
+    const dados = JSON.parse(cacheBase);
     ESTADO_APP.config.viagens = dados.viagens;
     ESTADO_APP.config.viagensInfo = dados.viagensInfo;
     ESTADO_APP.config.categoriasRoteiro = dados.categoriasRoteiro;
-    ESTADO_APP.config.categoriasChecklist = dados.categoriasChecklist; // 🌟 Puxando da memória
-    ESTADO_APP.dadosBD = dados.bd;
+    ESTADO_APP.config.categoriasChecklist = dados.categoriasChecklist; 
+    
+    // 🛡️ MÁGICA: Prioriza o cache local (onde estão os teus gastos pendentes)
+    if (cacheLocal) {
+        ESTADO_APP.dadosBD = JSON.parse(cacheLocal);
+    } else {
+        ESTADO_APP.dadosBD = dados.bd;
+    }
+    
     UI_renderizarInterface();
   } else {
-    Swal.fire('Erro', 'Você está sem internet e não possui dados salvos no celular.', 'error');
+    if (!isBackgroundSync) {
+        Swal.fire('Erro', 'Você está sem internet e não possui dados salvos no celular.', 'error');
+    }
   }
 }
 
@@ -2719,23 +2746,38 @@ function Gasto_salvar() {
     if (index > -1) ESTADO_APP.dadosBD[index] = payload;
   }
 
-  // 🌟 NOVO: Salvar no Cache Principal do teu App para evitar rollbacks!
+  // 🌟 PASSO 2: Salvar no Cache Principal do teu App para evitar rollbacks!
   // Isso impede que o Service Worker ou o Proxy Offline desfaçam nossa alteração.
   localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(ESTADO_APP.dadosBD));
 
-  // 🌟 PASSO 2: Fechar o Modal e Atualizar as DUAS Telas!
+  // 🌟 PASSO 3: Fechar o Modal e Atualizar as DUAS Telas!
   Gasto_fecharModal();
   if (typeof UI_renderizarGastos === 'function') UI_renderizarGastos(); 
   if (typeof UI_renderizarRoteiro === 'function') UI_renderizarRoteiro();
 
-  // 🌟 PASSO 3: Feedback Imediato ao Utilizador
+  // 🌟 PASSO 4: Feedback Imediato ao Utilizador
   Swal.fire({ title: 'Pronto!', icon: 'success', toast: true, position: 'top-end', timer: 1500, showConfirmButton: false });
   if (typeof UI_vibrar === 'function') UI_vibrar(20);
 
-  // 🌟 PASSO 4: Entregar ao Motor de Sincronização
-  SyncAPP_adicionarAcao(isNovo ? 'CRIAR_GASTO' : 'EDITAR_GASTO', payload);
+  // 🌟 PASSO 5: Entregar ao Motor de Sincronização Mágico (Proxy PWA)
+  // Substituímos o SyncAPP_adicionarAcao pelo google.script.run. O teu proxy interceta isto!
+  google.script.run
+    .withSuccessHandler(() => {
+       // Se tem internet, atualiza o cache silenciosamente e remove o status 'Pendente'
+       Api_buscarDados(true);
+    })
+    .withFailureHandler((err) => {
+       // Se não tem internet, o Proxy já mostrou o aviso de "Salvo no Aparelho" 
+       // e colocou na FILA_SYNC_VIAGENS. Ignoramos o erro aqui para não travar a tela.
+       console.log("Sem internet. Ação guardada na fila offline.");
+    })
+    .Viagens_salvarRegistro(payload, []);
 }
 
+
+/**
+ * 🚀 Gasto_excluirGasto (VERSÃO LOCAL-FIRST)
+ */
 function Gasto_excluirGasto() {
   const id = document.getElementById('gasto-id').value;
   if (!id) return;
@@ -2744,16 +2786,27 @@ function Gasto_excluirGasto() {
     title: 'Excluir Gasto?', text: "O valor será removido do seu orçamento.", icon: 'warning', showCancelButton: true, confirmButtonColor: '#e74c3c', confirmButtonText: 'Sim, excluir!', cancelButtonText: 'Cancelar'
   }).then((result) => {
     if (result.isConfirmed) {
-      // 🌟 Fecha o ecrã instantaneamente
-      Gasto_fecharModal(); 
+      
+      // 🌟 PASSO 1: OPTIMISTIC UI - Remove localmente primeiro
+      ESTADO_APP.dadosBD = ESTADO_APP.dadosBD.filter(i => String(i.ID) !== String(id));
+      localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(ESTADO_APP.dadosBD));
 
+      // 🌟 PASSO 2: Fecha o ecrã instantaneamente e re-renderiza
+      Gasto_fecharModal(); 
+      if (typeof UI_renderizarGastos === 'function') UI_renderizarGastos(); 
+      if (typeof UI_renderizarRoteiro === 'function') UI_renderizarRoteiro();
+
+      // 🌟 PASSO 3: Feedback Imediato
+      Swal.fire({ title: 'Excluído!', icon: 'success', toast: true, position: 'top-end', timer: 2000, showConfirmButton: false });
+      if (typeof UI_vibrar === 'function') UI_vibrar(20);
+
+      // 🌟 PASSO 4: Envia a ação de exclusão para o Proxy Mágico
       google.script.run
         .withSuccessHandler(() => {
-          Swal.fire({ title: 'Excluído!', icon: 'success', toast: true, position: 'top-end', timer: 2000, showConfirmButton: false });
-          Api_buscarDados(true);
+          Api_buscarDados(true); // Confirma silenciosamente se estiver online
         })
         .withFailureHandler(err => {
-          Swal.fire('Erro ao excluir', err.message, 'error');
+          console.log("Sem internet. Exclusão guardada na fila offline.");
         })
         .Viagens_excluirRegistro(id);
     }
