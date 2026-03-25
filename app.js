@@ -1,8 +1,7 @@
 
 /* =================================================================
- * 🤖 TRADUTOR UNIVERSAL PWA (Interceptador do google.script.run)
+ * 🤖 TRADUTOR PWA + MOTOR OFFLINE (Sync Queue)
  * ================================================================= */
-// URL da tua API
 const API_URL = "https://script.google.com/macros/s/AKfycbzvpFO4PVEYqTvy3B4cPuQhwDhKiJz9RSTYrJpRIr7VXktDf-IFkuMp6_LYbYGl6a0MBg/exec";
 
 window.google = {
@@ -14,17 +13,20 @@ window.google = {
   }
 };
 
-// O Proxy captura qualquer função do backend (Ex: Viagens_salvarRegistro)
 window.google.script.run = new Proxy(window.google.script.run, {
   get(target, prop) {
     if (prop in target) return target[prop];
     return async function(...args) {
       const onSuccess = target._onSuccess;
       const onFailure = target._onFailure;
-      target._onSuccess = null; 
-      target._onFailure = null;
+      target._onSuccess = null; target._onFailure = null;
+
+      // Se não for função de leitura (ex: salvar/excluir), preparamos para o modo Offline
+      const isAcaoModificadora = prop.includes('salvar') || prop.includes('excluir') || prop.includes('Toggle');
 
       try {
+        if (!navigator.onLine && isAcaoModificadora) throw new Error("offline");
+
         const req = await fetch(API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
@@ -35,13 +37,87 @@ window.google.script.run = new Proxy(window.google.script.run, {
         if (res.status === 'sucesso' && onSuccess) onSuccess(res.dados);
         else if (res.status === 'erro' && onFailure) onFailure(new Error(res.mensagem));
       } catch (e) {
-        if (onFailure) onFailure(e);
+        if (isAcaoModificadora) {
+          // 📴 ESTAMOS OFFLINE: Salva na fila de espera!
+          console.warn("Sem internet. Guardando ação na fila offline:", prop);
+          let filaSync = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
+          filaSync.push({ funcao: prop, parametros: args, id_local: Date.now() });
+          localStorage.setItem('FILA_SYNC_VIAGENS', JSON.stringify(filaSync));
+          
+          // Finge que deu sucesso para a UI continuar a funcionar de forma fluida
+          if (onSuccess) onSuccess({ status: "salvo_offline" });
+          
+          // Tenta atualizar a UI localmente (Opcional, SweetAlert discreto)
+          if(typeof Swal !== 'undefined') {
+             Swal.fire({
+                title: 'Salvo no Aparelho',
+                text: 'Você está offline. O dado será enviado ao Google quando a rede voltar.',
+                icon: 'info',
+                toast: true,
+                position: 'bottom',
+                showConfirmButton: false,
+                timer: 3000
+             });
+          }
+        } else {
+          if (onFailure) onFailure(e);
+        }
       }
     };
   }
 });
-/* ================================================================= */
 
+// 🔄 FUNÇÃO DE SINCRONIZAÇÃO DA FILA (Disparada manual ou auto)
+window.App_SincronizarDados = async function() {
+  const filaSync = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
+  if (filaSync.length === 0) {
+    console.log("Nada para sincronizar.");
+    return true; // Nada a fazer
+  }
+
+  if (!navigator.onLine) {
+    if(typeof Swal !== 'undefined') Swal.fire('Sem conexão', 'Conecte-se à internet para enviar os dados pendentes.', 'warning');
+    return false;
+  }
+
+  // Notificação visual de sincronização
+  const btnSync = document.getElementById('icone-sync');
+  if(btnSync) btnSync.classList.add('fa-spin');
+
+  let filaRestante = [];
+  let erros = 0;
+
+  for (let i = 0; i < filaSync.length; i++) {
+    const item = filaSync[i];
+    try {
+      const req = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ funcao: item.funcao, parametros: item.parametros })
+      });
+      const res = await req.json();
+      if (res.status !== 'sucesso') throw new Error();
+    } catch (err) {
+      erros++;
+      filaRestante.push(item); // Se falhar, mantém na fila para tentar depois
+    }
+  }
+
+  localStorage.setItem('FILA_SYNC_VIAGENS', JSON.stringify(filaRestante));
+  if(btnSync) btnSync.classList.remove('fa-spin');
+
+  if (erros === 0) {
+    if(typeof Swal !== 'undefined') Swal.fire({title: 'Sincronizado!', icon: 'success', toast: true, position: 'top-end', timer: 2000, showConfirmButton: false});
+    return true;
+  } else {
+    if(typeof Swal !== 'undefined') Swal.fire('Aviso', 'Alguns dados não puderam ser enviados. Tentaremos novamente depois.', 'warning');
+    return false;
+  }
+};
+
+// AUTO-SYNC: Tenta enviar sempre que a internet voltar
+window.addEventListener('online', App_SincronizarDados);
+/* ================================================================= */
 
 // =======================================================
 // 🧠 MÓDULO: 06_Js_Global.html (ESTADO E CACHE)
@@ -51,6 +127,39 @@ var ESTADO_APP = {
   dadosBD: [],
   config: { viagens: [], categoriasRoteiro: [] }
 };
+
+
+// =======================================================
+// 📱 INTEGRAÇÃO COM HARDWARE: BOTÃO VOLTAR NATIVO
+// =======================================================
+let historicoModais = [];
+
+// Chama esta função SEMPRE que abrires um modal (ex: no onclick do botão)
+function App_registrarAberturaModal(idDoModal) {
+  historicoModais.push(idDoModal);
+  // Cria uma página "falsa" no histórico do telemóvel
+  history.pushState({ modalAberto: idDoModal }, "");
+}
+
+// Ouve o botão físico de voltar do Android
+window.addEventListener('popstate', function(event) {
+  if (historicoModais.length > 0) {
+    // Pega o último modal aberto
+    const ultimoModal = historicoModais.pop();
+    const elementoModal = document.getElementById(ultimoModal);
+    
+    // Esconde o modal em vez de fechar o aplicativo
+    if (elementoModal) {
+      elementoModal.style.display = 'none';
+      // Se usares SweetAlert, fecha-o também
+      if (typeof Swal !== 'undefined') Swal.close(); 
+    }
+  }
+});
+
+// DICA DE IMPLEMENTAÇÃO:
+// Na tua função que abre modais (ex: UI_abrirModal('modal-atividade')), 
+// adiciona a linha: App_registrarAberturaModal('modal-atividade');
 
 
 // =======================================================
