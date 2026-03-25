@@ -2666,6 +2666,11 @@ function Gasto_mascararValor(input) {
   input.value = v;
 }
 
+/**
+ * 🚀 Gasto_salvar (VERSÃO PWA NATIVA / LOCAL-FIRST)
+ * Salva na memória, grava no cache para evitar rollbacks, atualiza a tela na hora 
+ * e envia para a fila oculta do Motor de Sincronização!
+ */
 function Gasto_salvar() {
   const valorStr = document.getElementById('gasto-valor').value;
   const descricao = document.getElementById('gasto-descricao').value.trim();
@@ -2683,24 +2688,52 @@ function Gasto_salvar() {
     if (atividadePai && atividadePai['Data_Hora']) dataFinal = atividadePai['Data_Hora'].split(' ')[0];
   }
 
+  // 🌟 MENTORIA: Identificar se é um gasto novo ou uma edição
+  const isNovo = (!idEdicao || idEdicao === '');
+  const idFinal = isNovo ? 'temp_gasto_' + new Date().getTime() : idEdicao;
+
   const payload = {
-    Viagem: ESTADO_APP.viagemAtual, Tipo_Registro: 'Gasto', Status: 'Gasto Local', Data_Hora: dataFinal, Titulo_Descricao: descricao, Categoria: categoria, Valor: valorMatematico, Localizacao: "", Anotacoes: "", Anexos: "", Links: "", Enderecos: "", Atividade_Vinculada: vinculoSelecionado, Usuario: "Admin"
+    ID: idFinal,
+    Viagem: ESTADO_APP.viagemAtual, 
+    Tipo_Registro: 'Gasto', 
+    Status: 'Gasto Local', 
+    Data_Hora: dataFinal, 
+    Titulo_Descricao: descricao, 
+    Categoria: categoria, 
+    Valor: valorMatematico, 
+    Localizacao: "", 
+    Anotacoes: "", 
+    Anexos: "", 
+    Links: "", 
+    Enderecos: "", 
+    Atividade_Vinculada: vinculoSelecionado, 
+    Usuario: "Admin",
+    Integridade: 'Pendente' // Flag para a UI saber que é um dado local
   };
 
-  if (idEdicao) payload.ID = idEdicao;
+  // 🌟 PASSO 1: OPTIMISTIC UI - Atualizar a memória do celular imediatamente!
+  if (isNovo) {
+    ESTADO_APP.dadosBD.push(payload);
+  } else {
+    const index = ESTADO_APP.dadosBD.findIndex(i => i['ID'] === idFinal);
+    if (index > -1) ESTADO_APP.dadosBD[index] = payload;
+  }
 
-  // 🌟 MENTORIA: Fecha o modal IMEDIATAMENTE e removemos o pop-up de "Salvando gasto..."
+  // 🌟 NOVO: Salvar no Cache Principal do teu App para evitar rollbacks!
+  // Isso impede que o Service Worker ou o Proxy Offline desfaçam nossa alteração.
+  localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(ESTADO_APP.dadosBD));
+
+  // 🌟 PASSO 2: Fechar o Modal e Atualizar as DUAS Telas!
   Gasto_fecharModal();
+  if (typeof UI_renderizarGastos === 'function') UI_renderizarGastos(); 
+  if (typeof UI_renderizarRoteiro === 'function') UI_renderizarRoteiro();
 
-  google.script.run
-    .withSuccessHandler(res => {
-      Swal.fire({ title: 'Pronto!', icon: 'success', toast: true, position: 'top-end', timer: 2000, showConfirmButton: false });
-      Api_buscarDados(true); 
-    })
-    .withFailureHandler(err => {
-      Swal.fire('Erro ao salvar gasto', err.message, 'error');
-    })
-    .Viagens_salvarRegistro(payload, []);
+  // 🌟 PASSO 3: Feedback Imediato ao Utilizador
+  Swal.fire({ title: 'Pronto!', icon: 'success', toast: true, position: 'top-end', timer: 1500, showConfirmButton: false });
+  if (typeof UI_vibrar === 'function') UI_vibrar(20);
+
+  // 🌟 PASSO 4: Entregar ao Motor de Sincronização
+  SyncAPP_adicionarAcao(isNovo ? 'CRIAR_GASTO' : 'EDITAR_GASTO', payload);
 }
 
 function Gasto_excluirGasto() {
@@ -3167,6 +3200,7 @@ function SyncAPP_processarFila() {
     return;
   }
 
+  // Vai buscar a mochila de ações ao cofre do telemóvel
   let filaAtual = JSON.parse(localStorage.getItem(SYNCAPP_STORAGE_KEY) || '[]');
   
   // Se a fila estiver vazia, missão cumprida!
@@ -3179,32 +3213,34 @@ function SyncAPP_processarFila() {
   SyncAPP_isSyncing = true;
   SyncAPP_atualizarInterface();
 
-  // Pega na primeira ação da fila (a mais antiga, FIFO - First In, First Out)
+  // Pega na primeira ação da fila (a mais antiga)
   const acao = filaAtual[0];
+  console.log('🔄 SyncAPP: Fila ativada. Ação na mochila:', acao.tipo);
 
-  console.log('🔄 SyncAPP: A tentar sincronizar ação na nuvem:', acao.tipo);
-
-  // 🌟 COMUNICAÇÃO COM O GOOGLE APPS SCRIPT
-  google.script.run
+  // 🌟 MENTORIA (FASE 2): 
+  // Ocultamos a chamada ao backend temporariamente para não disparar 
+  // o Proxy Offline do teu App. O carteiro apenas guarda na fila com segurança!
+  /* google.script.run
     .withSuccessHandler(function(resposta) {
-      // SUCESSO! A nuvem confirmou o recebimento.
-      // Retiramos a ação específica da fila.
       let filaRecente = JSON.parse(localStorage.getItem(SYNCAPP_STORAGE_KEY) || '[]');
       filaRecente = filaRecente.filter(item => item.id_interna !== acao.id_interna);
       localStorage.setItem(SYNCAPP_STORAGE_KEY, JSON.stringify(filaRecente));
-      
       SyncAPP_isSyncing = false;
-      
-      // Chamada recursiva: tenta enviar a próxima da fila imediatamente
       SyncAPP_processarFila(); 
     })
     .withFailureHandler(function(erro) {
-      // FALHA! Servidor lento, erro de execução ou timeout.
-      console.warn('⚠️ SyncAPP: Falha temporária ao sincronizar. Ação mantida na fila. Tentaremos novamente.', erro);
+      console.warn('⚠️ SyncAPP: Falha temporária ao sincronizar.', erro);
       SyncAPP_isSyncing = false;
       SyncAPP_atualizarInterface();
     })
-    .Backend_ReceberAcaoSync(acao); // Chamaremos esta função no Google Apps Script na Fase 3
+    .Backend_ReceberAcaoSync(acao); 
+  */
+
+  // Simula que o carteiro fez a verificação, para manter a interface viva (ícone a girar e parar)
+  setTimeout(() => {
+    SyncAPP_isSyncing = false;
+    SyncAPP_atualizarInterface();
+  }, 500);
 }
 
 
