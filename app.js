@@ -565,6 +565,7 @@ function UI_renderizarRoteiro() {
       
       const markerClass = isAgora ? "timeline-marker agora" : "timeline-marker";
       let safeId = String(item['ID'] || index).replace(/'/g, "\\'");
+      let safeTitulo = String(item['Titulo_Descricao']).replace(/'/g, "\\'"); // 🌟 Escapando o título para não quebrar a chamada JS
 
       const infoTempo = UI_formatarDataDuracao(item['Data_Hora'], item['Data_Hora_Fim']);
       const isPendente = item['Integridade'] === 'Pendente';
@@ -710,6 +711,11 @@ function UI_renderizarRoteiro() {
                   </h5>
                   <div style="display:flex; align-items:center; gap: 8px; flex-shrink: 0;">
                     ${htmlValor}
+                    
+                    <div onclick="event.stopPropagation(); UI_vibrar(20); Gasto_abrirModal('${safeTitulo}')" style="background: rgba(231, 76, 60, 0.1); padding: 4px 6px; border-radius: 6px; transition: 0.2s;" title="Adicionar Gasto Extra">
+                      <i class="fas fa-receipt text-danger" style="cursor:pointer; font-size: 0.85rem;"></i>
+                    </div>
+
                     <div onclick="event.stopPropagation(); UI_vibrar(20); Form_editarAtividade('${safeId}')" style="background: #f8f9fa; padding: 4px 6px; border-radius: 6px; transition: 0.2s;">
                       <i class="fas fa-edit text-muted" style="cursor:pointer; font-size: 0.85rem;"></i>
                     </div>
@@ -743,14 +749,13 @@ function UI_renderizarRoteiro() {
 /**
  * 🖥️ UI_renderizarGastos
  * Renderiza a aba de extrato financeiro.
- * [VERSÃO COMPACTA - DATA VISÍVEL, ACORDEÃO E BOTÃO DE EDIÇÃO SEGURO]
+ * [VERSÃO PREMIUM - EFEITO THREAD + SOMATÓRIO DE ADICIONAIS]
  */
 function UI_renderizarGastos() {
   const containerExtrato = document.getElementById('tela-extrato');
   if (!containerExtrato) return;
 
   const todosItens = ESTADO_APP.dadosBD.filter(i => i['Viagem'] === ESTADO_APP.viagemAtual && (i['Tipo_Registro'] === 'Atividade' || i['Tipo_Registro'] === 'Gasto'));
-  
   if (todosItens.length === 0) {
     containerExtrato.innerHTML = '<div class="text-center p-5 text-muted">Nenhum gasto registrado.<br>Use o botão + para começar.</div>';
     return;
@@ -798,14 +803,14 @@ function UI_renderizarGastos() {
 
   let qtdDiasComGasto = datasComGasto.size > 0 ? datasComGasto.size : 1;
   let mediaDiariaReal = totalGeral / qtdDiasComGasto;
-
+  
   const configViagem = ESTADO_APP.config.viagensInfo ? ESTADO_APP.config.viagensInfo.find(v => v.nome === ESTADO_APP.viagemAtual) : null;
   const orcamentoTeto = configViagem ? parseFloat(configViagem.orcamento) : 0;
   
   let mediaIdeal = orcamentoTeto > 0 ? (orcamentoTeto / qtdDiasViagemTotal) : 0;
-  let corMedia = '#f1c40f'; 
+  let corMedia = '#f1c40f';
   if (orcamentoTeto > 0) {
-    corMedia = (mediaDiariaReal > mediaIdeal) ? '#ff7675' : '#55efc4'; 
+    corMedia = (mediaDiariaReal > mediaIdeal) ? '#ff7675' : '#55efc4';
   }
 
   let previsaoTotal = mediaDiariaReal * qtdDiasViagemTotal;
@@ -813,7 +818,7 @@ function UI_renderizarGastos() {
   window.DADOS_RESUMO_DIARIO = {
     gastosPorDia, gastosPorCategoria, mediaDiariaReal, mediaIdeal, previsaoTotal, qtdDiasComGasto, orcamentoTeto
   };
-
+  
   window.DADOS_GRAFICO_COMPLETO = {
     categoria: somaCategoriasGrafico,
     status: somaStatusGrafico,
@@ -888,10 +893,12 @@ function UI_renderizarGastos() {
 
   const categoriasExistentes = ['Todos', ...new Set(todosItens.map(i => i['Categoria']).filter(c => c))];
   let pillsHtml = '<div style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 5px; scrollbar-width: none;">';
+  
   categoriasExistentes.forEach(cat => {
     let ativoClass = FILTRO_CAT_GASTO === cat ? 'ativo' : '';
     pillsHtml += `<button class="pill-filtro ${ativoClass}" onclick="UI_vibrar(20); Extrato_mudarFiltroCategoria('${cat}')">${cat}</button>`;
   });
+  
   pillsHtml += '</div>';
 
   let htmlTela = `
@@ -902,7 +909,8 @@ function UI_renderizarGastos() {
             <h6 style="font-size: 0.65rem; font-weight: 600; text-transform: uppercase; margin: 0; opacity: 0.8;">Custo Total</h6>
             <h3 style="margin: 0; font-weight: 900; font-size: 1.3rem;">${totalGeral.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</h3>
           </div>
-          <div style="text-align: right; cursor: pointer; background: rgba(0,0,0,0.15); padding: 6px 10px; border-radius: 10px; transition: 0.2s;" onclick="UI_vibrar(20); Extrato_abrirResumoDiario()">
+          <div style="text-align: right; cursor: pointer; background: rgba(0,0,0,0.15); padding: 6px 10px; border-radius: 10px; transition: 0.2s;"
+            onclick="UI_vibrar(20); Extrato_abrirResumoDiario()">
             <h6 style="font-size: 0.6rem; font-weight: 600; text-transform: uppercase; margin: 0; opacity: 0.9;">Média Diária <i class="fas fa-hand-pointer ms-1"></i></h6>
             <h6 style="margin: 0; font-weight: 800; color: ${corMedia}; font-size: 0.85rem;">${mediaDiariaReal.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}/dia</h6>
           </div>
@@ -911,7 +919,8 @@ function UI_renderizarGastos() {
     </div>
     
     <div style="padding: 0 2px;">
-      <button id="btn-toggle-grafico" onclick="Extrato_toggleGrafico()" class="btn btn-sm w-100 mt-2 mb-2" style="background: rgba(44, 62, 80, 0.05); color: var(--primary); border: 1px solid rgba(44, 62, 80, 0.1); border-radius: 8px; font-size: 0.75rem; font-weight: 700; transition: all 0.3s ease;">
+      <button id="btn-toggle-grafico" onclick="Extrato_toggleGrafico()" 
+        class="btn btn-sm w-100 mt-2 mb-2" style="background: rgba(44, 62, 80, 0.05); color: var(--primary); border: 1px solid rgba(44, 62, 80, 0.1); border-radius: 8px; font-size: 0.75rem; font-weight: 700; transition: all 0.3s ease;">
         <i class="fas fa-chart-pie text-accent"></i> <span>Ver Gráfico de Categorias</span>
       </button>
       
@@ -962,21 +971,21 @@ function UI_renderizarGastos() {
       let animDelay = index * 0.08; 
       let isPagoAntes = bloco.item['Status'] === 'Pago Antes';
       
-      // Badges minimalistas
       let badgePagamento = isPagoAntes ? 
         '<span class="badge" style="background: rgba(46, 204, 113, 0.1); color: #27ae60; font-size: 0.55rem; padding: 2px 6px; letter-spacing: 0.3px;">PAGO ANTES</span>' : 
         '<span class="badge" style="background: rgba(243, 156, 18, 0.1); color: #d35400; font-size: 0.55rem; padding: 2px 6px; letter-spacing: 0.3px;">GASTO LOCAL</span>';
 
       let safeIdBloco = String(bloco.item['ID']).replace(/'/g, "\\'");
+      let safeTituloBloco = String(bloco.item['Titulo_Descricao']).replace(/'/g, "\\'");
       
-      // 🌟 RECUPERAÇÃO DE DATA (Ex: "25/07" ou "Sem Data")
       let dataPartes = bloco.dataRef !== '9999-99-99' ? bloco.dataRef.split('-') : [];
       let dataFormatada = dataPartes.length === 3 ? `${dataPartes[2]}/${dataPartes[1]}` : 'Sem Data';
 
       if (bloco.tipo === 'pai') {
         let valorPai = Utils_garantirNumero(bloco.item['Valor']);
-        let htmlFilhos = '';
+        let valorFilhos = bloco.totalBloco - valorPai; // 🌟 NOVO: Cálculo do somatório dos filhos
         
+        let htmlFilhos = '';
         bloco.filhos.forEach(filho => {
           let safeIdFilho = String(filho['ID']).replace(/'/g, "\\'");
           let vFilho = Utils_garantirNumero(filho['Valor']);
@@ -984,29 +993,47 @@ function UI_renderizarGastos() {
           let badgeFilho = isPagoFilho ? '<i class="fas fa-check-circle text-success" title="Pago Antes"></i>' : '<i class="fas fa-wallet text-warning" title="Gasto Local"></i>';
           
           htmlFilhos += `
-            <div style="display:flex; justify-content:space-between; align-items:center; padding: 6px 0; border-top: 1px dashed #f1f3f5;">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <i class="fas fa-level-up-alt fa-rotate-90 text-muted" style="font-size:0.6rem;"></i>
-                <span style="font-size: 0.75rem; color: #555; font-weight: 600;">${filho['Titulo_Descricao']}</span>
+            <div style="display:flex; justify-content:space-between; align-items:center; background: #f8f9fa; padding: 8px 10px; border-radius: 8px; position: relative; margin-bottom: 6px;">
+              <div style="position: absolute; left: -14px; top: 15px; width: 14px; height: 2px; background: rgba(52, 152, 219, 0.3);"></div>
+              
+              <div style="display:flex; align-items:center; gap:8px; z-index: 2;">
+                <span style="font-size: 0.75rem; color: #444; font-weight: 700;">${filho['Titulo_Descricao']}</span>
               </div>
-              <div style="display:flex; align-items:center; gap: 8px;">
+              <div style="display:flex; align-items:center; gap: 8px; z-index: 2;">
                 ${badgeFilho}
                 <span style="font-size: 0.8rem; font-weight: 800; color: var(--danger);">${vFilho.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</span>
-                <i class="fas fa-edit text-muted" style="cursor:pointer; font-size: 0.85rem;" onclick="event.stopPropagation(); UI_vibrar(20); Gasto_editarGasto('${safeIdFilho}')"></i>
+                <i class="fas fa-edit text-muted" style="cursor:pointer; font-size: 0.85rem; padding: 2px;" onclick="event.stopPropagation(); UI_vibrar(20); Gasto_editarGasto('${safeIdFilho}')"></i>
               </div>
             </div>`;
         });
 
-        let htmlCustoPai = valorPai > 0 ? `<div style="font-size:0.75rem; color:#7f8c8d; margin-bottom: 5px; font-weight:600;">Custo Principal: ${valorPai.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</div>` : '';
+        // 🌟 NOVO: Bloco de Resumo Dinâmico (Custo Principal + Extras)
+        let htmlCustoPai = '<div style="margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px;">';
+        
+        if (valorPai > 0) {
+          htmlCustoPai += `
+            <div style="font-size:0.75rem; color:#7f8c8d; font-weight:600; display: flex; align-items: center; gap: 6px;">
+               <div style="width: 8px; height: 8px; border-radius: 50%; background: rgba(52, 152, 219, 0.5); z-index: 2;"></div>
+               Custo Principal (Atividade): <span style="color: var(--primary);">${valorPai.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</span>
+            </div>`;
+        }
+        if (valorFilhos > 0) {
+          htmlCustoPai += `
+            <div style="font-size:0.75rem; color:#7f8c8d; font-weight:600; display: flex; align-items: center; gap: 6px;">
+               <div style="width: 8px; height: 8px; border-radius: 50%; background: rgba(231, 76, 60, 0.5); z-index: 2;"></div>
+               Custos Adicionais Extras: <span style="color: var(--danger);">+ ${valorFilhos.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</span>
+            </div>`;
+        }
+        
+        htmlCustoPai += '</div>';
+          
         let idUnico = `filhos-${safeIdBloco}`;
         let idIcone = `icone-${safeIdBloco}`;
         
-        // Acordeão Inteligente (Se tiver filhos)
         let temFilhos = bloco.filhos.length > 0;
         let iconeChevron = temFilhos ? `<i id="${idIcone}" class="fas fa-chevron-down ms-1 text-muted" style="font-size: 0.65rem; transition: transform 0.3s; opacity: 0.5;"></i>` : '';
-        let onclickHeader = temFilhos ? `onclick="UI_vibrar(10); let d = document.getElementById('${idUnico}'); let i = document.getElementById('${idIcone}'); if(d.style.display==='none'){d.style.display='block'; if(i)i.style.transform='rotate(180deg)';}else{d.style.display='none'; if(i)i.style.transform='rotate(0deg)';}" style="cursor: pointer;"` : '';
+        let onclickHeader = temFilhos ? `onclick="UI_vibrar(10); let d = document.getElementById('${idUnico}'); let i = document.getElementById('${idIcone}'); d.classList.toggle('aberto'); if(d.classList.contains('aberto')){if(i)i.style.transform='rotate(180deg)';}else{if(i)i.style.transform='rotate(0deg)';}" style="cursor: pointer;"` : '';
 
-        // Botão Editar Isolado (Abre o Formulário de Atividade)
         htmlTela += `
           <div class="card-gasto-animado" style="animation-delay: ${animDelay}s; background: #fff; border-radius: 12px; padding: 12px; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); border-left: 4px solid var(--primary);">
             <div ${onclickHeader}>
@@ -1016,8 +1043,14 @@ function UI_renderizarGastos() {
                   <span class="badge" style="background: rgba(52, 152, 219, 0.1); color: var(--accent); font-weight: 800; font-size: 0.55rem; padding: 2px 5px; text-transform: uppercase;">${bloco.item['Categoria'] || 'Geral'}</span>
                   ${badgePagamento}
                 </div>
-                <div onclick="event.stopPropagation(); UI_vibrar(20); Form_editarAtividade('${safeIdBloco}')" style="background: #f8f9fa; padding: 4px 6px; border-radius: 6px; transition: 0.2s;">
-                  <i class="fas fa-edit text-muted" style="cursor:pointer; font-size: 0.85rem;"></i>
+                
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <div onclick="event.stopPropagation(); UI_vibrar(20); Gasto_abrirModal('${safeTituloBloco}')" style="background: rgba(231, 76, 60, 0.1); padding: 4px 6px; border-radius: 6px; transition: 0.2s;" title="Adicionar Gasto Extra">
+                    <i class="fas fa-receipt text-danger" style="cursor:pointer; font-size: 0.85rem;"></i>
+                  </div>
+                  <div onclick="event.stopPropagation(); UI_vibrar(20); Form_editarAtividade('${safeIdBloco}')" style="background: #f8f9fa; padding: 4px 6px; border-radius: 6px; transition: 0.2s;">
+                    <i class="fas fa-edit text-muted" style="cursor:pointer; font-size: 0.85rem;"></i>
+                  </div>
                 </div>
               </div>
               
@@ -1032,14 +1065,20 @@ function UI_renderizarGastos() {
             </div>
             
             ${temFilhos ? `
-            <div id="${idUnico}" class="gastos-filhos-container" style="display:none; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #eee;">
-              ${htmlCustoPai}
-              ${htmlFilhos}
+            <div id="${idUnico}" class="gastos-filhos-container">
+              <div style="padding-top: 12px; border-top: 1px dashed #eee; position: relative;">
+                <div style="position: absolute; left: 3px; top: 18px; bottom: 18px; width: 2px; background: rgba(52, 152, 219, 0.3);"></div>
+                
+                ${htmlCustoPai}
+                <div style="padding-left: 14px; position: relative;">
+                  ${htmlFilhos}
+                </div>
+              </div>
             </div>` : ''}
           </div>`;
           
       } else {
-        // Gasto Avulso (Não tem filhos, e abre Formulário de Gasto)
+        // Gasto Avulso
         htmlTela += `
           <div class="card-gasto-animado" style="animation-delay: ${animDelay}s; background: #fff; border-radius: 12px; padding: 12px; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); border-left: 4px solid var(--danger);">
             <div>
@@ -2519,7 +2558,8 @@ function MenuTopo_criarNovaViagem() {
 // 💳 MÓDULO: 15_Js_Gasto.html (LÓGICA DE DESPESAS)
 // =======================================================
 
-function Gasto_abrirModal() {
+// 🌟 FUNÇÃO ATUALIZADA: Suporta agrupamento <optgroup> e Abertura Contextual
+function Gasto_abrirModal(atividadeVinculada = null) {
   document.body.classList.remove('speed-dial-open');
   document.getElementById('form-novo-gasto').reset();
   
@@ -2536,13 +2576,48 @@ function Gasto_abrirModal() {
     ESTADO_APP.config.categoriasRoteiro.forEach(c => selCat.innerHTML += `<option value="${c}">${c}</option>`);
   }
 
+  // 🌟 NOVO: Lógica de Agrupamento Visual do Select
   const selVinculo = document.getElementById('gasto-vinculo');
   selVinculo.innerHTML = '<option value="">Gasto Avulso (Nenhuma)</option>';
+  
   const atividades = ESTADO_APP.dadosBD.filter(i => i['Viagem'] === ESTADO_APP.viagemAtual && i['Tipo_Registro'] === 'Atividade');
+
+  // 1. Separar as atividades pelas suas datas
+  const gruposPorData = {};
   atividades.forEach(ativ => {
-    const dataCurta = ativ['Data_Hora'] ? ativ['Data_Hora'].split(' ')[0] : 'Sem Data';
-    selVinculo.innerHTML += `<option value="${ativ['Titulo_Descricao']}">${dataCurta} - ${ativ['Titulo_Descricao']}</option>`;
+    const dataOriginal = ativ['Data_Hora'] ? ativ['Data_Hora'].split(' ')[0] : 'Sem Data';
+    if (!gruposPorData[dataOriginal]) gruposPorData[dataOriginal] = [];
+    gruposPorData[dataOriginal].push(ativ);
   });
+
+  // 2. Criar os <optgroup> ordenados cronologicamente
+  Object.keys(gruposPorData).sort().forEach(data => {
+    // Formata a data para o cabeçalho (ex: 23/07/2026)
+    let dataFormatada = 'Sem Data';
+    if (data !== 'Sem Data') {
+      const partes = data.split('-');
+      dataFormatada = partes.length === 3 ? `${partes[2]}/${partes[1]}/${partes[0]}` : data;
+    }
+
+    // Cria o grupo
+    let optgroup = document.createElement('optgroup');
+    optgroup.label = `📅 ${dataFormatada}`;
+
+    // Adiciona as atividades (agora sem a data no texto, pois já está no grupo)
+    gruposPorData[data].forEach(ativ => {
+      let option = document.createElement('option');
+      option.value = ativ['Titulo_Descricao'];
+      option.text = ativ['Titulo_Descricao'];
+      optgroup.appendChild(option);
+    });
+
+    selVinculo.appendChild(optgroup);
+  });
+
+  // 🌟 NOVO: Se o utilizador clicou no card, seleciona automaticamente!
+  if (atividadeVinculada) {
+    selVinculo.value = atividadeVinculada;
+  }
 
   Gasto_verificarVinculo();
   App_AbrirTela('modal-gasto', 'flex');
