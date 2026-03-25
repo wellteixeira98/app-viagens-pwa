@@ -1,11 +1,15 @@
 
 /* =================================================================
- * 🤖 TRADUTOR PWA + MOTOR DE NAVEGAÇÃO NATIVA E OFFLINE
+ * 🤖 TRADUTOR PWA + NAVEGAÇÃO NATIVA (DOUBLE BACK TO EXIT)
  * ================================================================= */
 const API_URL = "https://script.google.com/macros/s/AKfycbzvpFO4PVEYqTvy3B4cPuQhwDhKiJz9RSTYrJpRIr7VXktDf-IFkuMp6_LYbYGl6a0MBg/exec";
 
 // --- CONTROLE DO BOTÃO VOLTAR (SMART NAVIGATION) ---
 window.App_ModaisAbertos = [];
+let tentouSair = false;
+
+// 🛡️ PROTEÇÃO INICIAL: Cria um histórico falso para interceptar o primeiro 'voltar'
+history.pushState({ telaPrincipal: true }, "");
 
 window.App_AbrirTela = function(idModal, tipo = 'block') {
   const el = document.getElementById(idModal);
@@ -22,23 +26,47 @@ window.App_FecharTela = function(idModal) {
     history.back(); // Simula o botão físico para manter o histórico limpo
   } else {
     const el = document.getElementById(idModal);
-    if(el) el.style.display = 'none'; // Fallback seguro se não estiver no histórico
+    if(el) el.style.display = 'none'; // Fallback seguro
   }
 };
 
 window.addEventListener('popstate', function(event) {
-  // Se houver um SweetAlert aberto, fecha só ele e devolve o evento
+  // 1. Se houver um SweetAlert aberto, fecha só ele e devolve a trava
   if (typeof Swal !== 'undefined' && Swal.isVisible()) {
     Swal.close();
     history.pushState(event.state, ""); 
     return;
   }
-  // Se houver modais, fecha o último
+  
+  // 2. Se houver modais, fecha o último
   if (window.App_ModaisAbertos.length > 0) {
     const ultimoModal = window.App_ModaisAbertos.pop();
     const el = document.getElementById(ultimoModal);
     if (el) el.style.display = 'none';
+    return;
   }
+
+  // 3. TELA PRINCIPAL: Proteção de Duplo Clique para Sair (Double Back to Exit)
+  if (!tentouSair) {
+    tentouSair = true;
+    history.pushState({ telaPrincipal: true }, ""); // Repõe a trava para não fechar
+    
+    if(typeof Swal !== 'undefined') {
+      Swal.fire({
+        title: 'Pressione voltar novamente para sair',
+        toast: true,
+        position: 'bottom',
+        showConfirmButton: false,
+        timer: 2000,
+        background: '#333',
+        color: '#fff'
+      });
+    }
+    
+    // Passados 2 segundos, o utilizador tem de apertar duas vezes novamente
+    setTimeout(() => { tentouSair = false; }, 2000);
+  }
+  // Se 'tentouSair' for true (clicou a 2ª vez em menos de 2 seg), o código não faz nada e o PWA fecha naturalmente!
 });
 
 // --- PROXY DE COMUNICAÇÃO COM O GOOGLE (OFFLINE FIRST) ---
@@ -104,10 +132,7 @@ window.google.script.run = new Proxy(window.google.script.run, {
 // 🔄 FUNÇÃO DE SINCRONIZAÇÃO DA FILA
 window.App_SincronizarDados = async function() {
   const filaSync = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
-  if (filaSync.length === 0) {
-    console.log("Nada para sincronizar.");
-    return true; 
-  }
+  if (filaSync.length === 0) return true; 
 
   if (!navigator.onLine) {
     if(typeof Swal !== 'undefined') Swal.fire('Sem conexão', 'Conecte-se à internet para enviar os dados pendentes.', 'warning');
