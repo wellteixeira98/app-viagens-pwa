@@ -24,16 +24,50 @@
       <div class="skeleton-card"><div class="skeleton-line" style="width: 30%"></div><div class="skeleton-line" style="width: 90%"></div><div class="skeleton-line" style="width: 50%"></div></div>
       <div class="skeleton-card"><div class="skeleton-line" style="width: 50%"></div><div class="skeleton-line" style="width: 70%"></div></div>
     </div>
-
 <div style="padding: 8px 15px; background: #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 1000;">
-      <div>
-        <span style="font-size: 0.65rem; color: #95a5a6; font-weight: bold; text-transform: uppercase;">Viagem Atual</span>
-        <h5 id="ui-titulo-viagem" style="margin: 0; color: #2c3e50; font-weight: 800; font-size: 1.1rem;">Carregando...</h5>
-      </div>
-      <button class="btn btn-light btn-sm" onclick="MenuTopo_abrir()" style="border-radius: 50px; font-weight: bold; color: #3498db; box-shadow: 0 2px 5px rgba(0,0,0,0.05); padding: 4px 12px; font-size: 0.8rem;">
-        <i class="fas fa-exchange-alt"></i> Trocar
-      </button>
-    </div>
+  <div>
+    <span style="font-size: 0.65rem; color: #95a5a6; font-weight: bold; text-transform: uppercase;">Viagem Atual</span>
+    <h5 id="ui-titulo-viagem" style="margin: 0; color: #2c3e50; font-weight: 800; font-size: 1.1rem;">Carregando...</h5>
+  </div>
+  
+  <div style="display: flex; gap: 8px; align-items: center;">
+    
+    <button id="btn-sync-offline" class="btn btn-light btn-sm" onclick="App_SincronizarDados()" style="border-radius: 50px; font-weight: bold; color: #95a5a6; box-shadow: 0 2px 5px rgba(0,0,0,0.05); padding: 4px 12px; font-size: 0.8rem; transition: all 0.3s ease;">
+      <i class="fas fa-cloud-upload-alt" id="icone-sync"></i>
+    </button>
+
+    <button class="btn btn-light btn-sm" onclick="MenuTopo_abrir()" style="border-radius: 50px; font-weight: bold; color: #3498db; box-shadow: 0 2px 5px rgba(0,0,0,0.05); padding: 4px 12px; font-size: 0.8rem;">
+      <i class="fas fa-exchange-alt"></i> Trocar
+    </button>
+    
+  </div>
+</div>
+
+<script>
+  setInterval(() => {
+    try {
+      const fila = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
+      const btn = document.getElementById('btn-sync-offline');
+      
+      if(btn) {
+        if(fila.length > 0) {
+          // 🔴 Há dados pendentes (Modo Offline Ativo)
+          btn.style.color = '#27ae60'; // Verde
+          btn.style.backgroundColor = '#e8f8f5';
+          btn.innerHTML = `<i class="fas fa-sync-alt fa-spin"></i> ${fila.length}`;
+        } else {
+          // 🟢 Tudo sincronizado com a nuvem do Google
+          btn.style.color = '#95a5a6'; // Cinza discreto
+          btn.style.backgroundColor = '#f8f9fa';
+          btn.innerHTML = `<i class="fas fa-cloud-upload-alt"></i>`;
+        }
+      }
+    } catch(e) {
+      console.error("Erro no monitor visual de sync", e);
+    }
+  }, 2000);
+</script>
+
 
 <div id="tela-roteiro" style="padding: 15px; max-width: 800px; margin: 0 auto;">
       
