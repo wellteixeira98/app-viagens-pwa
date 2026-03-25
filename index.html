@@ -32,6 +32,10 @@
   
   <div style="display: flex; gap: 8px; align-items: center;">
     
+    <div id="sync-indicator" style="display: flex; align-items: center; gap: 5px; font-size: 0.75rem; color: #7f8c8d; background: rgba(255,255,255,0.8); padding: 4px 8px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+  <i id="sync-icon" class="fas fa-cloud text-success"></i>
+  <span id="sync-text" style="font-weight: 700; font-size: 0.65rem;">Sincronizado</span>
+</div>
 
     <button id="btn-sync-offline" class="btn btn-light btn-sm" onclick="App_SincronizarDados()" style="border-radius: 50px; font-weight: bold; color: #95a5a6; box-shadow: 0 2px 5px rgba(0,0,0,0.05); padding: 4px 12px; font-size: 0.8rem; transition: all 0.3s ease;">
       <i class="fas fa-cloud-upload-alt" id="icone-sync"></i>
