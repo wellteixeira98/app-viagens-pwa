@@ -1,0 +1,302 @@
+
+  :root {
+    --primary: #2c3e50;
+    --secondary: #95a5a6;
+    --accent: #3498db;        
+    --success: #27ae60; 
+    --danger: #e74c3c;
+    --bg-body: #f8f9fa;
+    --card-bg: #ffffff;
+    --radius: 16px;           
+    --shadow: 0 10px 25px rgba(0,0,0,0.06);
+  }
+
+  body { 
+    background-color: var(--bg-body); 
+    color: #333; 
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    touch-action: pan-y !important; 
+    overscroll-behavior-y: none;
+  }
+
+  /* 🌟 NOVO: Remove o flash/fundo azul feio ao tocar na tela no Android/iOS */
+  * {
+    -webkit-tap-highlight-color: transparent; 
+  }
+
+  /* 🌟 NOVO: Animação suave para as abas do aplicativo */
+  .tab-animada {
+    animation: fadeSlideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+
+  @keyframes fadeSlideUp {
+    from { opacity: 0; transform: translateY(15px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Cards da Linha do Tempo (Roteiro) */
+  .roteiro-card {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 15px;
+    box-shadow: var(--shadow);
+    border-left: 5px solid var(--accent);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+
+  /* Modais e Speed Dial */
+  .speed-dial-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(4px);
+    z-index: 6100 !important; display: none; opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .speed-dial-menu {
+    position: fixed; bottom: 90px; right: 20px;
+    display: flex; flex-direction: column; gap: 14px;
+    z-index: 6200 !important; pointer-events: none;
+  }
+
+  .speed-dial-btn {
+    background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    padding: 8px 24px 8px 8px; border-radius: 50px;
+    display: flex; align-items: center; gap: 14px;
+    font-weight: 700; font-size: 0.95rem; color: var(--primary);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.12);
+    transform: translateY(30px) scale(0); opacity: 0;
+    transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    pointer-events: auto; cursor: pointer; border: none;
+  }
+
+  .speed-dial-btn .icon-wrapper {
+    width: 42px; height: 42px; border-radius: 50%;
+    display: flex; justify-content: center; align-items: center;
+    color: white; font-size: 1.1rem;
+  }
+
+  .speed-dial-open .speed-dial-overlay { display: block; opacity: 1; }
+  .speed-dial-open .speed-dial-btn { transform: translateY(0) scale(1); opacity: 1; }
+
+  /* Tela de Carregamento */
+  #loading-overlay { 
+    position: fixed; top:0; left:0; width:100%; height:100%; 
+    background: rgba(255,255,255,0.85); backdrop-filter: blur(8px);
+    z-index: 9999 !important; display: none; justify-content: center; 
+    align-items: center; flex-direction: column;
+  }
+
+/* 🌟 CORREÇÃO: Garante que os Alertas (SweetAlert) fiquem SEMPRE na frente de tudo */
+  .swal2-container {
+    z-index: 10000 !important;
+  }
+
+  /* 🌟 NOVO: Efeitos para a Tela de Gastos */
+  
+  /* Cabeçalho Fixo com Efeito de Vidro (Glassmorphism) */
+  .sticky-header-gastos {
+    position: sticky;
+    top: 60px; /* Fica logo abaixo do header principal */
+    z-index: 900;
+    background: rgba(248, 249, 250, 0.95);
+    backdrop-filter: blur(10px);
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(0,0,0,0.05);
+    margin-bottom: 15px;
+  }
+
+  /* Animação em Cascata para os Cards */
+  .card-gasto-animado {
+    opacity: 0;
+    animation: fadeSlideUp 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+
+  /* Filtros Rápidos (Pills) */
+  .pill-filtro {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 800;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid #ddd;
+    background: var(--card-bg);
+    color: var(--secondary);
+  }
+  .pill-filtro.ativo {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+
+  /* Accordion Suave para Filhos */
+  .gastos-filhos-container {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
+    opacity: 0;
+  }
+  .gastos-filhos-container.aberto {
+    max-height: 1000px; /* Um valor alto o suficiente para caber o conteúdo */
+    opacity: 1;
+    margin-top: 10px;
+  }
+
+
+
+  /* 🌟 TIMELINE VERTICAL (ROTEIRO VIVO) */
+  .timeline-wrapper {
+    position: relative;
+    padding-left: 28px;
+    margin-top: 15px;
+  }
+  /* O eixo vertical contínuo */
+  .timeline-wrapper::before {
+    content: '';
+    position: absolute;
+    top: 5px; bottom: 0; left: 10px;
+    width: 3px;
+    background: #e9ecef;
+    border-radius: 3px;
+  }
+  .timeline-item {
+    position: relative;
+    margin-bottom: 25px;
+  }
+  /* O nó da atividade */
+  .timeline-marker {
+    position: absolute;
+    top: 15px; left: -28px;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--card-bg);
+    border: 5px solid var(--accent);
+    box-shadow: 0 0 0 2px #fff;
+    z-index: 2;
+  }
+  /* A animação mágica de quando a atividade está acontecendo AGORA */
+  .timeline-marker.agora {
+    border-color: var(--danger);
+    background: var(--danger);
+    animation: pulsarAgora 1.5s infinite;
+  }
+  @keyframes pulsarAgora {
+    0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.4), 0 0 0 2px #fff; }
+    70% { box-shadow: 0 0 0 12px rgba(231, 76, 60, 0), 0 0 0 2px #fff; }
+    100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0), 0 0 0 2px #fff; }
+  }
+  /* Design do Espaço Vazio (Gap) - GHOST MODE */
+  .timeline-gap {
+    position: relative;
+    padding-left: 5px;
+    margin-bottom: 15px; /* Reduzido de 25px para ganhar espaço vertical */
+    display: flex;
+    align-items: center;
+    gap: 8px; /* Reduzido de 12px */
+    height: 20px; /* Altura mínima fixada para não empurrar o layout */
+    transition: all 0.3s ease;
+  }
+  
+  .timeline-gap-line {
+    flex: 1;
+    height: 1px;
+    border-top: 1.5px dashed #bdc3c7; /* Linha ligeiramente mais fina */
+    transition: border-color 0.3s;
+  }
+  
+  .timeline-gap-text {
+    font-size: 0.6rem; 
+    font-weight: 800; 
+    color: #95a5a6;
+    background: #f8f9fa; /* Fundido com o background */
+    padding: 2px 8px; 
+    border-radius: 8px;
+  }
+  
+  /* O container fantasma que guarda o input */
+  .timeline-gap-input-wrapper {
+    display: flex; 
+    gap: 5px; 
+    flex: 1; 
+    max-width: 0; /* Começa escondido */
+    opacity: 0; 
+    overflow: hidden;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  /* Ao passar o rato ou focar (quando a função JS é ativada), ele expande! */
+  .timeline-gap.ativo .timeline-gap-input-wrapper {
+    max-width: 220px;
+    opacity: 1;
+  }
+  
+  /* Um botão invisível que cobre a linha para capturar o toque no telemóvel */
+  .timeline-gap-trigger {
+    position: absolute;
+    top: -10px;
+    left: 0;
+    right: 0;
+    bottom: -10px;
+    z-index: 5;
+    cursor: text;
+  }
+  
+  /* Ao ativar, esconde o trigger para permitir clicar no input e botão */
+  .timeline-gap.ativo .timeline-gap-trigger {
+    display: none;
+  }
+  
+  /* Estilo mais subtil para o botão de expandir detalhes */
+  .btn-expandir-detalhes {
+    background: transparent !important;
+    border: none !important;
+    color: #95a5a6 !important;
+    padding: 0 !important;
+    font-size: 0.7rem !important;
+    text-align: center;
+    margin-top: 5px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  
+  .btn-expandir-detalhes:hover {
+    color: var(--accent) !important;
+  }
+  /* 🌟 VISUAL DIFERENCIADO: NOTAS (POST-ITS) */
+.nota-postit {
+    background: rgba(255, 255, 255, 0.5); /* Fundo translúcido */
+    border-left: 3px solid var(--secondary) !important; /* Borda cinza discreta */
+    padding: 10px 14px;
+    border-radius: 8px;
+    box-shadow: none; /* Remove a sombra para maior discrição */
+    margin-bottom: 15px;
+    border: 1px solid rgba(0, 0, 0, 0.03); /* Borda externa quase impercetível */
+    transition: all 0.2s ease;
+  }
+
+  .nota-postit:hover {
+    background: #ffffff;
+    border-left-color: var(--accent) !important; /* Ganha destaque apenas ao tocar/focar */
+  }
+
+  .nota-titulo {
+    font-weight: 700;
+    color: var(--secondary); /* Texto em cinza suave */
+    font-size: 0.8rem;
+    letter-spacing: 0.3px;
+  }
+
+  .nota-edit-icon {
+    color: #ced4da; /* Ícone muito discreto */
+    font-size: 0.8rem;
+    transition: color 0.2s;
+  }
+
+  .nota-postit:hover .nota-edit-icon {
+    color: var(--accent); /* Ícone ganha cor no hover */
+  }
+
