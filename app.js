@@ -1,9 +1,47 @@
 
 /* =================================================================
- * 🤖 TRADUTOR PWA + MOTOR OFFLINE (Sync Queue)
+ * 🤖 TRADUTOR PWA + MOTOR DE NAVEGAÇÃO NATIVA E OFFLINE
  * ================================================================= */
 const API_URL = "https://script.google.com/macros/s/AKfycbzvpFO4PVEYqTvy3B4cPuQhwDhKiJz9RSTYrJpRIr7VXktDf-IFkuMp6_LYbYGl6a0MBg/exec";
 
+// --- CONTROLE DO BOTÃO VOLTAR (SMART NAVIGATION) ---
+window.App_ModaisAbertos = [];
+
+window.App_AbrirTela = function(idModal, tipo = 'block') {
+  const el = document.getElementById(idModal);
+  if(el) {
+    el.style.display = tipo;
+    window.App_ModaisAbertos.push(idModal);
+    history.pushState({ modalAtivo: idModal }, "");
+  }
+};
+
+window.App_FecharTela = function(idModal) {
+  const index = window.App_ModaisAbertos.indexOf(idModal);
+  if (index !== -1) {
+    history.back(); // Simula o botão físico para manter o histórico limpo
+  } else {
+    const el = document.getElementById(idModal);
+    if(el) el.style.display = 'none'; // Fallback seguro se não estiver no histórico
+  }
+};
+
+window.addEventListener('popstate', function(event) {
+  // Se houver um SweetAlert aberto, fecha só ele e devolve o evento
+  if (typeof Swal !== 'undefined' && Swal.isVisible()) {
+    Swal.close();
+    history.pushState(event.state, ""); 
+    return;
+  }
+  // Se houver modais, fecha o último
+  if (window.App_ModaisAbertos.length > 0) {
+    const ultimoModal = window.App_ModaisAbertos.pop();
+    const el = document.getElementById(ultimoModal);
+    if (el) el.style.display = 'none';
+  }
+});
+
+// --- PROXY DE COMUNICAÇÃO COM O GOOGLE (OFFLINE FIRST) ---
 window.google = {
   script: {
     run: {
@@ -21,7 +59,6 @@ window.google.script.run = new Proxy(window.google.script.run, {
       const onFailure = target._onFailure;
       target._onSuccess = null; target._onFailure = null;
 
-      // Se não for função de leitura (ex: salvar/excluir), preparamos para o modo Offline
       const isAcaoModificadora = prop.includes('salvar') || prop.includes('excluir') || prop.includes('Toggle');
 
       try {
@@ -38,16 +75,13 @@ window.google.script.run = new Proxy(window.google.script.run, {
         else if (res.status === 'erro' && onFailure) onFailure(new Error(res.mensagem));
       } catch (e) {
         if (isAcaoModificadora) {
-          // 📴 ESTAMOS OFFLINE: Salva na fila de espera!
           console.warn("Sem internet. Guardando ação na fila offline:", prop);
           let filaSync = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
           filaSync.push({ funcao: prop, parametros: args, id_local: Date.now() });
           localStorage.setItem('FILA_SYNC_VIAGENS', JSON.stringify(filaSync));
           
-          // Finge que deu sucesso para a UI continuar a funcionar de forma fluida
           if (onSuccess) onSuccess({ status: "salvo_offline" });
           
-          // Tenta atualizar a UI localmente (Opcional, SweetAlert discreto)
           if(typeof Swal !== 'undefined') {
              Swal.fire({
                 title: 'Salvo no Aparelho',
@@ -67,12 +101,12 @@ window.google.script.run = new Proxy(window.google.script.run, {
   }
 });
 
-// 🔄 FUNÇÃO DE SINCRONIZAÇÃO DA FILA (Disparada manual ou auto)
+// 🔄 FUNÇÃO DE SINCRONIZAÇÃO DA FILA
 window.App_SincronizarDados = async function() {
   const filaSync = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
   if (filaSync.length === 0) {
     console.log("Nada para sincronizar.");
-    return true; // Nada a fazer
+    return true; 
   }
 
   if (!navigator.onLine) {
@@ -80,7 +114,6 @@ window.App_SincronizarDados = async function() {
     return false;
   }
 
-  // Notificação visual de sincronização
   const btnSync = document.getElementById('icone-sync');
   if(btnSync) btnSync.classList.add('fa-spin');
 
@@ -99,7 +132,7 @@ window.App_SincronizarDados = async function() {
       if (res.status !== 'sucesso') throw new Error();
     } catch (err) {
       erros++;
-      filaRestante.push(item); // Se falhar, mantém na fila para tentar depois
+      filaRestante.push(item); 
     }
   }
 
@@ -115,7 +148,6 @@ window.App_SincronizarDados = async function() {
   }
 };
 
-// AUTO-SYNC: Tenta enviar sempre que a internet voltar
 window.addEventListener('online', App_SincronizarDados);
 /* ================================================================= */
 
@@ -160,6 +192,44 @@ window.addEventListener('popstate', function(event) {
 // DICA DE IMPLEMENTAÇÃO:
 // Na tua função que abre modais (ex: UI_abrirModal('modal-atividade')), 
 // adiciona a linha: App_registrarAberturaModal('modal-atividade');
+
+/* =================================================================
+ * 📱 MOTOR DE NAVEGAÇÃO NATIVA (BOTÃO VOLTAR DO CELULAR)
+ * ================================================================= */
+window.App_ModaisAbertos = [];
+
+// Função que substitui o teu antigo: App_AbrirTela('...', 'block')
+window.App_AbrirTela = function(idModal, tipoDisplay = 'block') {
+  const elemento = document.getElementById(idModal);
+  if (elemento) {
+    elemento.style.display = tipoDisplay;
+    window.App_ModaisAbertos.push(idModal);
+    
+    // MÁGICA: Avisa o celular que uma nova "página" abriu
+    history.pushState({ modalAtivo: idModal }, "");
+  }
+};
+
+// O "Ouvinte" que deteta quando o botão físico de voltar é apertado
+window.addEventListener('popstate', function(event) {
+  
+  // 1. Se houver um aviso do SweetAlert aberto, fecha só o aviso primeiro!
+  if (typeof Swal !== 'undefined' && Swal.isVisible()) {
+    Swal.close();
+    // Devolve o histórico para não quebrar a ordem do modal que está por baixo
+    history.pushState(event.state, ""); 
+    return;
+  }
+
+  // 2. Se houver modais abertos, fecha o último que foi aberto
+  if (window.App_ModaisAbertos.length > 0) {
+    const ultimoModal = window.App_ModaisAbertos.pop();
+    const elemento = document.getElementById(ultimoModal);
+    if (elemento) {
+      elemento.style.display = 'none';
+    }
+  }
+});
 
 
 // =======================================================
@@ -1776,7 +1846,7 @@ function Form_abrirModal() {
 
   FORM_QTD = 1;
   if (document.getElementById('form-qtd')) document.getElementById('form-qtd').innerText = "1";
-  if (document.getElementById('form-total-calc')) document.getElementById('form-total-calc').style.display = 'none';
+  if (App_FecharTela('form-total-calc')) document.getElementById('form-total-calc');
 
   RECURSOS_TEMP = { enderecos: [], links: [], arquivos: [] };
   if (document.getElementById('lista-recursos-temp')) document.getElementById('lista-recursos-temp').innerHTML = '';
@@ -1790,7 +1860,7 @@ function Form_abrirModal() {
       selCategoria.innerHTML += `<option value="${cat}">${cat}</option>`;
     });
   }
-  document.getElementById('modal-novo').style.display = 'flex';
+  App_AbrirTela('modal-novo', 'flex');
 }
 
 // ==========================================================
@@ -1954,7 +2024,7 @@ function Form_editarAtividade(id) {
 }
 
 function Form_fecharModal() {
-  document.getElementById('modal-novo').style.display = 'none';
+  App_FecharTela('modal-novo');
 }
 
 function Form_mascararValor(input) {
@@ -2431,7 +2501,7 @@ function Gasto_abrirModal() {
   // Limpa Edição
   document.getElementById('gasto-id').value = "";
   document.getElementById('titulo-modal-gasto').innerHTML = '<i class="fas fa-receipt me-2"></i>Novo Gasto';
-  document.getElementById('btn-excluir-gasto').style.display = 'none';
+  App_FecharTela('btn-excluir-gasto');
 
   document.getElementById('gasto-data').value = new Date().toISOString().split('T')[0];
 
@@ -2450,7 +2520,7 @@ function Gasto_abrirModal() {
   });
 
   Gasto_verificarVinculo();
-  document.getElementById('modal-gasto').style.display = 'flex';
+  App_AbrirTela('modal-gasto', 'flex');
 }
 
 // 🌟 NOVA FUNÇÃO: CARREGAR DADOS PARA EDIÇÃO
@@ -2461,7 +2531,7 @@ function Gasto_editarGasto(id) {
   Gasto_abrirModal(); // Abre e carrega os selectores
   
   document.getElementById('titulo-modal-gasto').innerHTML = '<i class="fas fa-edit me-2"></i>Editar Gasto';
-  document.getElementById('btn-excluir-gasto').style.display = 'block';
+  App_AbrirTela('btn-excluir-gasto', 'block');
 
   document.getElementById('gasto-id').value = item.ID;
   document.getElementById('gasto-descricao').value = item.Titulo_Descricao;
@@ -2479,7 +2549,7 @@ function Gasto_editarGasto(id) {
 }
 
 function Gasto_fecharModal() {
-  document.getElementById('modal-gasto').style.display = 'none';
+  App_FecharTela('modal-gasto');
 }
 
 function Gasto_verificarVinculo() {
@@ -2584,11 +2654,11 @@ function Checklist_abrirModal() {
     selCat.innerHTML += `<option value="Geral">Geral (Cadastre na planilha)</option>`;
   }
 
-  document.getElementById('modal-checklist').style.display = 'flex';
+  App_AbrirTela('modal-checklist', 'flex');
 }
 
 function Checklist_fecharModal() {
-  document.getElementById('modal-checklist').style.display = 'none';
+  App_FecharTela('modal-checklist');
 }
 
 // 🌟 Adiciona item à lista temporária (Carrinho)
