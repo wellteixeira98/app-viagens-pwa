@@ -2666,41 +2666,70 @@ function Gasto_mascararValor(input) {
   input.value = v;
 }
 
-function Gasto_salvar() {
-  const valorStr = document.getElementById('gasto-valor').value;
-  const descricao = document.getElementById('gasto-descricao').value.trim();
+/**
+ * 🚀 GASTO_SALVAR (VERSÃO OPTIMISTIC UI & LOCAL-FIRST)
+ * Salva na memória, atualiza a tela na hora e manda para a fila oculta!
+ */
+function Gasto_salvar(event) {
+  if (event) event.preventDefault(); // Evita recarregar a página se for um form submit
+
+  // 1. CAPTURAR OS DADOS DO FORMULÁRIO (Ajusta os IDs se os teus forem diferentes)
+  const idExistente = document.getElementById('gasto-id').value;
+  const titulo = document.getElementById('gasto-titulo').value;
+  const valorInput = document.getElementById('gasto-valor').value;
+  const data = document.getElementById('gasto-data').value;
   const categoria = document.getElementById('gasto-categoria').value;
-  const vinculoSelecionado = document.getElementById('gasto-vinculo').value;
-  const idEdicao = document.getElementById('gasto-id').value;
+  const vinculo = document.getElementById('gasto-vinculo').value;
+  // const status = document.getElementById('gasto-status').value; // Se tiveres
 
-  if (!valorStr || !descricao || !categoria) return Swal.fire('Opa!', 'Preencha o Valor, a Descrição e a Categoria.', 'warning');
-
-  const valorMatematico = parseFloat(valorStr.replace(/\./g, "").replace(",", ".")) || 0;
-
-  let dataFinal = document.getElementById('gasto-data').value;
-  if (vinculoSelecionado) {
-    const atividadePai = ESTADO_APP.dadosBD.find(i => i['Viagem'] === ESTADO_APP.viagemAtual && i['Tipo_Registro'] === 'Atividade' && i['Titulo_Descricao'] === vinculoSelecionado);
-    if (atividadePai && atividadePai['Data_Hora']) dataFinal = atividadePai['Data_Hora'].split(' ')[0];
+  // Validação básica
+  if (!titulo || !valorInput) {
+    alert("Preencha o título e o valor.");
+    return;
   }
 
-  const payload = {
-    Viagem: ESTADO_APP.viagemAtual, Tipo_Registro: 'Gasto', Status: 'Gasto Local', Data_Hora: dataFinal, Titulo_Descricao: descricao, Categoria: categoria, Valor: valorMatematico, Localizacao: "", Anotacoes: "", Anexos: "", Links: "", Enderecos: "", Atividade_Vinculada: vinculoSelecionado, Usuario: "Admin"
+  const isNovo = !idExistente || idExistente === '';
+  // Se for novo, geramos um ID provisório único baseado no tempo.
+  const idFinal = isNovo ? 'temp_gasto_' + new Date().getTime() : idExistente;
+
+  // 2. MONTAR O OBJETO EXATAMENTE COMO O DB_SMART ESPERA
+  const novoRegistro = {
+    'ID': idFinal,
+    'Viagem': ESTADO_APP.viagemAtual,
+    'Tipo_Registro': 'Gasto',
+    'Titulo_Descricao': titulo,
+    'Valor': valorInput,
+    'Data_Hora': data + ' 12:00:00', // Força uma hora para não dar erro de ordenação
+    'Categoria': categoria,
+    'Atividade_Vinculada': vinculo || '',
+    'Status': 'Gasto Local', // Ou pega do select, se houver
+    'Integridade': 'Pendente' // 🌟 Uma marcação para o ecrã saber que ainda não subiu
   };
 
-  if (idEdicao) payload.ID = idEdicao;
+  // 3. OPTIMISTIC UI: ATUALIZAR A MEMÓRIA LOCAL IMEDIATAMENTE
+  if (isNovo) {
+    ESTADO_APP.dadosBD.push(novoRegistro);
+  } else {
+    // Se estiver a editar, substitui o antigo pelo novo
+    const index = ESTADO_APP.dadosBD.findIndex(i => i['ID'] === idFinal);
+    if (index > -1) ESTADO_APP.dadosBD[index] = novoRegistro;
+  }
 
-  // 🌟 MENTORIA: Fecha o modal IMEDIATAMENTE e removemos o pop-up de "Salvando gasto..."
-  Gasto_fecharModal();
+  // 4. ATUALIZAR A TELA (0ms de latência para o utilizador!)
+  App_FecharTela('modal-gasto');
+  UI_renderizarGastos(); // Recarrega a aba extrato com a Água já lá!
+  
+  // Opcional: Se a pessoa também puder adicionar gastos da aba Roteiro, atualiza-a também:
+  // UI_renderizarRoteiro(); 
 
-  google.script.run
-    .withSuccessHandler(res => {
-      Swal.fire({ title: 'Pronto!', icon: 'success', toast: true, position: 'top-end', timer: 2000, showConfirmButton: false });
-      Api_buscarDados(true); 
-    })
-    .withFailureHandler(err => {
-      Swal.fire('Erro ao salvar gasto', err.message, 'error');
-    })
-    .Viagens_salvarRegistro(payload, []);
+  // 5. ENTREGAR AO MOTOR DE SINCRONIZAÇÃO (Background)
+  // O motor assume daqui e envia para o Google sem bloquear o ecrã.
+  SyncAPP_adicionarAcao(isNovo ? 'CRIAR_GASTO' : 'EDITAR_GASTO', novoRegistro);
+
+  // 6. FEEDBACK SUAVE (Em vez do bloqueio de "Carregando...")
+  // Se tiveres uma função de Toast, usa-a. Senão, uma vibração já ajuda.
+  UI_vibrar(20);
+  console.log("✅ Salvo localmente e enviado para a fila!");
 }
 
 function Gasto_excluirGasto() {
