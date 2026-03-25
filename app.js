@@ -3122,3 +3122,136 @@ function Mapa_centralizarUsuario() {
   }
 }
 
+
+/**
+ * 🔄 MOTOR DE SINCRONIZAÇÃO (SYNC ENGINE) - OFFLINE FIRST
+ * Arquivo: 21_Js_SyncAPP.html
+ * Missão: Gerir a fila de ações locais e sincronizar com o backend em background.
+ */
+
+const SYNCAPP_STORAGE_KEY = 'WanderlogClone_SyncQueue';
+let SyncAPP_isSyncing = false;
+
+// =========================================================================
+// 1. ADICIONA UMA AÇÃO À FILA (O utilizador fez algo na App)
+// =========================================================================
+function SyncAPP_adicionarAcao(tipoAcao, payload) {
+  // Cria o "envelope" com a ação, os dados e a data/hora exata do telemóvel
+  const novaAcao = {
+    id_interna: 'sync_' + new Date().getTime() + '_' + Math.random().toString(36).substr(2, 5),
+    tipo: tipoAcao, // ex: 'CRIAR_GASTO', 'EDITAR_ATIVIDADE', 'EXCLUIR_REGISTRO'
+    dados: payload,
+    timestamp_local: new Date().toISOString() // Fundamental para Last-Write-Wins
+  };
+
+  // Vai buscar a fila atual ao localStorage do telemóvel
+  let filaAtual = JSON.parse(localStorage.getItem(SYNCAPP_STORAGE_KEY) || '[]');
+  filaAtual.push(novaAcao);
+  
+  // Guarda a fila atualizada no telemóvel
+  localStorage.setItem(SYNCAPP_STORAGE_KEY, JSON.stringify(filaAtual));
+  
+  // Atualiza imediatamente o ícone da nuvem e tenta despachar o envelope
+  SyncAPP_atualizarInterface();
+  SyncAPP_processarFila();
+}
+
+
+// =========================================================================
+// 2. PROCESSA A FILA (O "Carteiro Invisível" em background)
+// =========================================================================
+function SyncAPP_processarFila() {
+  // Se já estiver a enviar algo ou não houver internet, aborta silenciosamente.
+  if (SyncAPP_isSyncing || !navigator.onLine) {
+    SyncAPP_atualizarInterface();
+    return;
+  }
+
+  let filaAtual = JSON.parse(localStorage.getItem(SYNCAPP_STORAGE_KEY) || '[]');
+  
+  // Se a fila estiver vazia, missão cumprida!
+  if (filaAtual.length === 0) {
+    SyncAPP_atualizarInterface();
+    return; 
+  }
+
+  // Bloqueia novos envios paralelos para não duplicar requisições
+  SyncAPP_isSyncing = true;
+  SyncAPP_atualizarInterface();
+
+  // Pega na primeira ação da fila (a mais antiga, FIFO - First In, First Out)
+  const acao = filaAtual[0];
+
+  console.log('🔄 SyncAPP: A tentar sincronizar ação na nuvem:', acao.tipo);
+
+  // 🌟 COMUNICAÇÃO COM O GOOGLE APPS SCRIPT
+  google.script.run
+    .withSuccessHandler(function(resposta) {
+      // SUCESSO! A nuvem confirmou o recebimento.
+      // Retiramos a ação específica da fila.
+      let filaRecente = JSON.parse(localStorage.getItem(SYNCAPP_STORAGE_KEY) || '[]');
+      filaRecente = filaRecente.filter(item => item.id_interna !== acao.id_interna);
+      localStorage.setItem(SYNCAPP_STORAGE_KEY, JSON.stringify(filaRecente));
+      
+      SyncAPP_isSyncing = false;
+      
+      // Chamada recursiva: tenta enviar a próxima da fila imediatamente
+      SyncAPP_processarFila(); 
+    })
+    .withFailureHandler(function(erro) {
+      // FALHA! Servidor lento, erro de execução ou timeout.
+      console.warn('⚠️ SyncAPP: Falha temporária ao sincronizar. Ação mantida na fila. Tentaremos novamente.', erro);
+      SyncAPP_isSyncing = false;
+      SyncAPP_atualizarInterface();
+    })
+    .Backend_ReceberAcaoSync(acao); // Chamaremos esta função no Google Apps Script na Fase 3
+}
+
+
+// =========================================================================
+// 3. GESTÃO DA INTERFACE (O Ícone da Nuvem no Header)
+// =========================================================================
+function SyncAPP_atualizarInterface() {
+  const icon = document.getElementById('sync-icon');
+  const text = document.getElementById('sync-text');
+  
+  // Se a UI ainda não estiver renderizada (ex: ecrã de login), ignora.
+  if (!icon || !text) return;
+
+  let filaAtual = JSON.parse(localStorage.getItem(SYNCAPP_STORAGE_KEY) || '[]');
+
+  if (!navigator.onLine) {
+    icon.className = 'fas fa-cloud-slash text-danger';
+    text.innerText = filaAtual.length > 0 ? `${filaAtual.length} p/ Enviar (Offline)` : 'Offline';
+    text.style.color = 'var(--danger)';
+  } else if (SyncAPP_isSyncing) {
+    icon.className = 'fas fa-sync fa-spin text-accent';
+    text.innerText = `A guardar ${filaAtual.length}...`;
+    text.style.color = 'var(--accent)';
+  } else if (filaAtual.length > 0) {
+    icon.className = 'fas fa-cloud-upload-alt text-warning';
+    text.innerText = `${filaAtual.length} Pendentes`;
+    text.style.color = '#f39c12';
+  } else {
+    icon.className = 'fas fa-cloud text-success';
+    text.innerText = 'Guardado';
+    text.style.color = '#27ae60';
+  }
+}
+
+
+// =========================================================================
+// 4. INICIALIZAÇÃO E LISTENERS (Gatilhos Automáticos)
+// =========================================================================
+// Deteta reações do sistema operativo ao ligar/desligar o Wi-Fi ou Dados Móveis
+window.addEventListener('online', SyncAPP_processarFila);
+window.addEventListener('offline', SyncAPP_atualizarInterface);
+
+// Tenta sincronizar automaticamente a cada 10 segundos 
+// (Garante que nada fica preso se houver uma falha silenciosa de rede)
+setInterval(SyncAPP_processarFila, 10000);
+
+// Força uma verificação 2 segundos após o carregamento inicial da App
+setTimeout(SyncAPP_processarFila, 2000);
+
+
