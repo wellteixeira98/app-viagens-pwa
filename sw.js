@@ -1,5 +1,5 @@
 
-const CACHE_NAME = 'viagens-v20260326_1506';
+const CACHE_NAME = 'viagens-v20260326_1508';
 const urlsToCache = ['./', './index.html', './style.css', './app.js', './manifest.json'];
 
 self.addEventListener('install', event => {
