@@ -1,9 +1,10 @@
-/* App Build: 20260326_1401 */
+/* App Build: 20260326_1410 */
 
 /* =================================================================
- * 🤖 TRADUTOR PWA + NAVEGAÇÃO NATIVA E SYNC INTELIGENTE
+ * 🤖 TRADUTOR PWA + OPTIMISTIC UI + MANUAL SYNC
  * ================================================================= */
 const API_URL = "https://script.google.com/macros/s/AKfycbzvpFO4PVEYqTvy3B4cPuQhwDhKiJz9RSTYrJpRIr7VXktDf-IFkuMp6_LYbYGl6a0MBg/exec";
+const SYNC_QUEUE_KEY = 'VIAGENS_MANUAL_QUEUE';
 
 // --- CONTROLE DO BOTÃO VOLTAR (SMART NAVIGATION) ---
 window.App_ModaisAbertos = [];
@@ -64,12 +65,11 @@ window.addEventListener('popstate', function(event) {
       });
     }
     
-    // Passados 2 segundos, o utilizador tem de apertar duas vezes novamente
     setTimeout(() => { tentouSair = false; }, 2000);
   }
 });
 
-// --- PROXY DE COMUNICAÇÃO COM O GOOGLE (OFFLINE FIRST) ---
+// --- PROXY DE COMUNICAÇÃO COM O GOOGLE (OPTIMISTIC UI) ---
 window.google = {
   script: {
     run: {
@@ -89,9 +89,26 @@ window.google.script.run = new Proxy(window.google.script.run, {
 
       const isAcaoModificadora = prop.includes('salvar') || prop.includes('excluir') || prop.includes('Toggle');
 
-      try {
-        if (!navigator.onLine && isAcaoModificadora) throw new Error("offline");
+      // ⚡ MAGIA DO OPTIMISTIC UI: AÇÕES DE ESCRITA VÃO PARA A FILA MANUAL
+      if (isAcaoModificadora) {
+         let filaSync = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
+         filaSync.push({ funcao: prop, parametros: args, id_local: Date.now() });
+         localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(filaSync));
+         
+         // Atualiza o botão no topo da tela para mostrar que há itens pendentes
+         if (typeof SyncAPP_atualizarInterface === 'function') SyncAPP_atualizarInterface();
 
+         // Devolvemos sucesso IMEDIATO ao frontend (A app fecha o modal na hora!)
+         if (onSuccess) {
+           setTimeout(() => onSuccess({ status: "sucesso_local", mensagem: "Salvo localmente" }), 50); 
+         }
+         return; 
+      }
+
+      // 🔍 AÇÕES DE LEITURA (Buscar dados): Vai à nuvem se tiver internet
+      try {
+        if (!navigator.onLine) throw new Error("offline");
+        
         const req = await fetch(API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
@@ -102,93 +119,56 @@ window.google.script.run = new Proxy(window.google.script.run, {
         if (res.status === 'sucesso' && onSuccess) onSuccess(res.dados);
         else if (res.status === 'erro' && onFailure) onFailure(new Error(res.mensagem));
       } catch (e) {
-        if (isAcaoModificadora) {
-          console.warn("Sem internet. Guardando ação na fila offline:", prop);
-          let filaSync = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
-          filaSync.push({ funcao: prop, parametros: args, id_local: Date.now() });
-          localStorage.setItem('FILA_SYNC_VIAGENS', JSON.stringify(filaSync));
-          
-          if (onSuccess) onSuccess({ status: "salvo_offline" });
-          
-          if(typeof Swal !== 'undefined') {
-             Swal.fire({
-                title: 'Salvo no Aparelho',
-                text: 'Você está offline. O dado será enviado ao Google quando a rede voltar.',
-                icon: 'info',
-                toast: true,
-                position: 'bottom',
-                showConfirmButton: false,
-                timer: 3000
-             });
-          }
-        } else {
-          if (onFailure) onFailure(e);
-        }
+        if (onFailure) onFailure(e);
       }
     };
   }
 });
 
-// 🔄 FUNÇÃO DE SINCRONIZAÇÃO DA FILA (COM PROTEÇÃO ANTI-LOOP)
-window.App_SincronizarDados = async function() {
-  const filaSync = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
-  if (filaSync.length === 0) {
-     if (typeof SyncAPP_atualizarInterface === 'function') SyncAPP_atualizarInterface();
-     return true; 
-  }
+// 🔄 FUNÇÃO DO BOTÃO MANUAL DE SINCRONIZAÇÃO
+window.App_ProcessarFilaManual = async function() {
+  const filaSync = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
+  if (filaSync.length === 0) return; 
 
-  if (!navigator.onLine) return false;
-
-  const btnSync = document.getElementById('icone-sync');
-  if(btnSync) btnSync.classList.add('fa-spin');
+  const icon = document.getElementById('sync-icon');
+  const text = document.getElementById('sync-text');
+  
+  if(icon) icon.className = 'fas fa-sync fa-spin text-warning';
+  if(text) text.innerText = 'A enviar...';
 
   let filaRestante = [];
-  let errosFatais = 0;
+  let sucessos = 0;
 
   for (let i = 0; i < filaSync.length; i++) {
     const item = filaSync[i];
     try {
-      // 1. Tenta enviar para o backend
       const req = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ funcao: item.funcao, parametros: item.parametros })
       });
-      
       const res = await req.json();
-      
-      // 2. A MÁGICA: Se o Google retornar um erro lógico (ex: falta de dados), nós DESCARTAMOS a ação.
-      if (res.status === 'erro') {
-         console.warn("Item corrompido descartado da fila:", res.mensagem);
-         errosFatais++;
+      if (res.status === 'sucesso') {
+         sucessos++;
+      } else {
+         console.warn("Erro lógico no servidor, descartando item:", res.mensagem);
       }
-
     } catch (err) {
-      // 3. ERRO DE REDE: Se a internet cair a meio, nós mantemos na fila para tentar depois.
-      console.log("Falha de rede. Mantendo o item na fila.");
+      console.error("Falha de rede ao enviar item. Mantendo na fila.");
       filaRestante.push(item); 
     }
   }
 
-  // 4. Salva apenas os itens que sofreram erro de internet
-  localStorage.setItem('FILA_SYNC_VIAGENS', JSON.stringify(filaRestante));
+  localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(filaRestante));
   
-  if(btnSync) btnSync.classList.remove('fa-spin');
   if (typeof SyncAPP_atualizarInterface === 'function') SyncAPP_atualizarInterface();
 
-  // 5. Feedback amigável para o utilizador
-  if (filaRestante.length === 0 && errosFatais === 0) {
-    if(typeof Swal !== 'undefined') Swal.fire({title: 'Sincronizado!', icon: 'success', toast: true, position: 'top-end', timer: 2000, showConfirmButton: false});
-    return true;
-  } else if (errosFatais > 0) {
-    if(typeof Swal !== 'undefined') Swal.fire('Limpeza Automática', 'Alguns itens antigos corrompidos foram eliminados do cache.', 'info');
-    return true; 
+  if (filaRestante.length === 0) {
+    if(typeof Swal !== 'undefined') Swal.fire('Tudo Salvo!', 'Os teus dados foram guardados na nuvem com sucesso.', 'success');
   } else {
-    return false;
+    if(typeof Swal !== 'undefined') Swal.fire('Aviso', 'A internet falhou a meio. ' + sucessos + ' itens foram salvos, mas ' + filaRestante.length + ' ficaram pendentes.', 'warning');
   }
 };
-
-window.addEventListener('online', App_SincronizarDados);
 /* ================================================================= */
 
 // =======================================================
@@ -3285,74 +3265,60 @@ function Mapa_centralizarUsuario() {
 
 
 /**
- * 🔄 MOTOR DE SINCRONIZAÇÃO (SYNC ENGINE) - UNIFICADO E INTELIGENTE
+ * 🛑 MOTOR DE SINCRONIZAÇÃO MANUAL E OFFLINE-FIRST
  * Arquivo: 21_Js_SyncAPP.html
- * Missão: Gerir a fila de ações locais, evitar loops infinitos e manter a UI atualizada.
+ * Regra: NADA vai para a nuvem automaticamente. Tudo fica na fila até o usuário mandar.
  */
 
-// 1. CHAVE UNIFICADA COM O PROXY DO PWA
-const SYNCAPP_STORAGE_KEY = 'FILA_SYNC_VIAGENS'; 
+const SYNC_QUEUE_KEY = 'VIAGENS_MANUAL_QUEUE';
 
-// 2. FUNÇÃO VISUAL: Atualiza os ícones e textos
+// 1. ATUALIZA A INTERFACE VISUAL DO BOTÃO
 function SyncAPP_atualizarInterface() {
   const icon = document.getElementById('sync-icon');
   const text = document.getElementById('sync-text');
+  const indicador = document.getElementById('sync-indicator');
   
-  // Se a UI ainda não estiver renderizada (ex: ecrã de login), ignora.
   if (!icon || !text) return;
 
-  // Lê a fila correta e unificada
-  let filaAtual = JSON.parse(localStorage.getItem(SYNCAPP_STORAGE_KEY) || '[]');
+  let filaAtual = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
   
-  if (!navigator.onLine) {
-    icon.className = 'fas fa-cloud-slash text-danger';
-    text.innerText = filaAtual.length > 0 ? `${filaAtual.length} p/ Enviar (Offline)` : 'Offline';
-    text.style.color = 'var(--danger)';
-  } else if (filaAtual.length > 0) {
-    // Mostra que há itens pendentes e a tentar subir
-    icon.className = 'fas fa-sync fa-spin text-warning';
-    text.innerText = `A sincronizar ${filaAtual.length}...`;
+  // Transformar o indicador num botão clicável
+  if (indicador) {
+    indicador.style.cursor = 'pointer';
+    indicador.onclick = SyncAPP_DispararSincronismo; // Clicar = Sincronizar
+  }
+
+  if (filaAtual.length > 0) {
+    icon.className = 'fas fa-cloud-upload-alt text-warning';
+    text.innerText = `Sincronizar (${filaAtual.length})`;
     text.style.color = '#f39c12';
-    
-    // Tenta forçar a sincronização silenciosamente se detetar algo parado
-    if (typeof window.App_SincronizarDados === 'function') {
-      window.App_SincronizarDados();
-    }
   } else {
     icon.className = 'fas fa-cloud text-success';
-    text.innerText = 'Sincronizado';
+    text.innerText = 'App Atualizado';
     text.style.color = '#27ae60';
   }
 }
 
-// 3. VÁLVULA DE ESCAPE (Botão de Pânico)
-// Criamos uma função global para limpar dados corrompidos
-window.SyncAPP_LimparFilaMorta = function() {
-  localStorage.removeItem(SYNCAPP_STORAGE_KEY);
-  localStorage.removeItem('WanderlogClone_SyncQueue'); // Apaga também a fila antiga que causou o bug
-  SyncAPP_atualizarInterface();
-  if (typeof Swal !== 'undefined') {
-    Swal.fire('Cache Limpo!', 'A fila de sincronização fantasma foi eliminada.', 'success');
+// 2. FUNÇÃO ACIONADA PELO CLIQUE DO UTILIZADOR
+async function SyncAPP_DispararSincronismo() {
+  let filaAtual = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
+  
+  if (filaAtual.length === 0) {
+    if(typeof Swal !== 'undefined') Swal.fire('Tudo em dia!', 'Não há alterações pendentes para enviar.', 'info');
+    return;
   }
-};
 
-// 4. ATIVAR O "BOTÃO DE PÂNICO" NA INTERFACE
-// Se o utilizador tocar 2 vezes rápidas no indicador "Sincronizado/Pendente", a fila é forçada a limpar
-document.addEventListener("DOMContentLoaded", () => {
-  const indicador = document.getElementById('sync-indicator');
-  if (indicador) {
-    indicador.ondblclick = window.SyncAPP_LimparFilaMorta;
-    indicador.style.cursor = "pointer"; // Mostra ao utilizador que é clicável
+  if (!navigator.onLine) {
+    if(typeof Swal !== 'undefined') Swal.fire('Sem Internet', 'Precisas de conexão para sincronizar os dados guardados.', 'error');
+    return;
   }
-});
 
-// 5. INICIALIZAÇÃO E LISTENERS (Gatilhos Automáticos)
-window.addEventListener('online', () => {
-  SyncAPP_atualizarInterface();
-  if (typeof window.App_SincronizarDados === 'function') window.App_SincronizarDados();
-});
-window.addEventListener('offline', SyncAPP_atualizarInterface);
+  // Se a função do PWA estiver disponível, chama-a
+  if (typeof window.App_ProcessarFilaManual === 'function') {
+    window.App_ProcessarFilaManual();
+  }
+}
 
-// Mantém a interface visual sempre atualizada a cada 3 segundos
-setInterval(SyncAPP_atualizarInterface, 3000);
+// Atualiza a interface ao carregar a página
+document.addEventListener("DOMContentLoaded", SyncAPP_atualizarInterface);
 
