@@ -1,13 +1,15 @@
-/* App Build: 20260326_1506 */
+/* App Build: 20260326_1508 */
 
 /* =================================================================
- * 🤖 TRADUTOR PWA + OPTIMISTIC UI AVANÇADO + CACHE DE FERRO
+ * 🤖 TRADUTOR PWA + NAVEGAÇÃO NATIVA (DOUBLE BACK TO EXIT)
  * ================================================================= */
-var API_URL = "https://script.google.com/macros/s/AKfycbw_L3HYd-LlpxKObn60If0lb20LG0jX7eZxxHrQYgrV/exec";
-var SYNC_QUEUE_KEY = 'VIAGENS_MANUAL_QUEUE';
-var tentouSair = false;
+const API_URL = "https://script.google.com/macros/s/AKfycbzvpFO4PVEYqTvy3B4cPuQhwDhKiJz9RSTYrJpRIr7VXktDf-IFkuMp6_LYbYGl6a0MBg/exec";
 
-window.App_ModaisAbertos = window.App_ModaisAbertos || [];
+// --- CONTROLE DO BOTÃO VOLTAR (SMART NAVIGATION) ---
+window.App_ModaisAbertos = [];
+let tentouSair = false;
+
+// 🛡️ PROTEÇÃO INICIAL: Cria um histórico falso para interceptar o primeiro 'voltar'
 history.pushState({ telaPrincipal: true }, "");
 
 window.App_AbrirTela = function(idModal, tipo = 'block') {
@@ -22,152 +24,126 @@ window.App_AbrirTela = function(idModal, tipo = 'block') {
 window.App_FecharTela = function(idModal) {
   const index = window.App_ModaisAbertos.indexOf(idModal);
   if (index !== -1) {
-    history.back(); 
+    history.back(); // Simula o botão físico para manter o histórico limpo
   } else {
     const el = document.getElementById(idModal);
-    if(el) el.style.display = 'none';
+    if(el) el.style.display = 'none'; // Fallback seguro
   }
 };
 
 window.addEventListener('popstate', function(event) {
+  // 1. Se houver um SweetAlert aberto, fecha só ele e devolve a trava
   if (typeof Swal !== 'undefined' && Swal.isVisible()) {
     Swal.close();
     history.pushState(event.state, ""); 
     return;
   }
+  
+  // 2. Se houver modais, fecha o último
   if (window.App_ModaisAbertos.length > 0) {
     const ultimoModal = window.App_ModaisAbertos.pop();
     const el = document.getElementById(ultimoModal);
     if (el) el.style.display = 'none';
     return;
   }
+
+  // 3. TELA PRINCIPAL: Proteção de Duplo Clique para Sair (Double Back to Exit)
   if (!tentouSair) {
     tentouSair = true;
-    history.pushState({ telaPrincipal: true }, ""); 
+    history.pushState({ telaPrincipal: true }, ""); // Repõe a trava para não fechar
+    
     if(typeof Swal !== 'undefined') {
       Swal.fire({
         title: 'Pressione voltar novamente para sair',
-        toast: true, position: 'bottom', showConfirmButton: false, timer: 2000, background: '#333', color: '#fff'
+        toast: true,
+        position: 'bottom',
+        showConfirmButton: false,
+        timer: 2000,
+        background: '#333',
+        color: '#fff'
       });
     }
+    
+    // Passados 2 segundos, o utilizador tem de apertar duas vezes novamente
     setTimeout(() => { tentouSair = false; }, 2000);
   }
 });
 
-window.google = window.google || {};
-window.google.script = window.google.script || {};
-window.google.script.run = {
-  withSuccessHandler: function(onSuccess) { this._onSuccess = onSuccess; return this; },
-  withFailureHandler: function(onFailure) { this._onFailure = onFailure; return this; }
+// --- PROXY DE COMUNICAÇÃO COM O GOOGLE (OFFLINE FIRST) ---
+window.google = {
+  script: {
+    run: {
+      withSuccessHandler: function(onSuccess) { this._onSuccess = onSuccess; return this; },
+      withFailureHandler: function(onFailure) { this._onFailure = onFailure; return this; }
+    }
+  }
 };
 
 window.google.script.run = new Proxy(window.google.script.run, {
   get(target, prop) {
-    if (prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
     if (prop in target) return target[prop];
-
     return async function(...args) {
       const onSuccess = target._onSuccess;
       const onFailure = target._onFailure;
       target._onSuccess = null; target._onFailure = null;
 
-      if (typeof prop === 'string' && (prop.includes('salvar') || prop.includes('excluir') || prop.includes('Toggle'))) {
-         let filaSync = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
-         
-         if (prop === 'Viagens_salvarRegistro') {
-            let payload = args[0];
-            let isNovo = !payload.ID || String(payload.ID).startsWith('temp_');
-            
-            if (isNovo && !payload.ID) payload.ID = 'temp_' + Date.now();
-            
-            if (window.ESTADO_APP && window.ESTADO_APP.dadosBD) {
-               let idx = window.ESTADO_APP.dadosBD.findIndex(i => i.ID === payload.ID);
-               if (idx > -1) window.ESTADO_APP.dadosBD[idx] = payload;
-               else window.ESTADO_APP.dadosBD.push(payload);
-               
-               localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(window.ESTADO_APP.dadosBD));
-               if (typeof window.UI_renderizarInterface === 'function') window.UI_renderizarInterface();
-            }
-
-            if (isNovo) {
-                let payloadBackend = JSON.parse(JSON.stringify(payload));
-                payloadBackend.ID = ""; 
-                filaSync.push({ funcao: prop, parametros: [payloadBackend, args[1]], id_local: payload.ID });
-            } else if (String(payload.ID).startsWith('temp_')) {
-                let itemFila = filaSync.find(i => i.id_local === payload.ID);
-                if (itemFila) {
-                    let payloadBackend = JSON.parse(JSON.stringify(payload));
-                    payloadBackend.ID = "";
-                    itemFila.parametros[0] = payloadBackend;
-                }
-            } else {
-                filaSync.push({ funcao: prop, parametros: args, id_local: Date.now() });
-            }
-         }
-         else if (prop === 'Viagens_excluirRegistro') {
-            let idExcluir = args[0];
-            if (window.ESTADO_APP && window.ESTADO_APP.dadosBD) {
-               window.ESTADO_APP.dadosBD = window.ESTADO_APP.dadosBD.filter(i => String(i.ID) !== String(idExcluir));
-               localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(window.ESTADO_APP.dadosBD));
-               if (typeof window.UI_renderizarInterface === 'function') window.UI_renderizarInterface();
-            }
-            if (String(idExcluir).startsWith('temp_')) {
-                filaSync = filaSync.filter(i => i.id_local !== idExcluir);
-            } else {
-                filaSync.push({ funcao: prop, parametros: args, id_local: Date.now() });
-            }
-         }
-         else {
-             filaSync.push({ funcao: prop, parametros: args, id_local: Date.now() });
-         }
-
-         localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(filaSync));
-         if (typeof SyncAPP_atualizarInterface === 'function') SyncAPP_atualizarInterface();
-         if (onSuccess) setTimeout(() => onSuccess({ status: "sucesso_local" }), 50); 
-         return;
-      }
+      const isAcaoModificadora = prop.includes('salvar') || prop.includes('excluir') || prop.includes('Toggle');
 
       try {
-        if (!navigator.onLine) throw new Error("offline");
+        if (!navigator.onLine && isAcaoModificadora) throw new Error("offline");
+
         const req = await fetch(API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
           body: JSON.stringify({ funcao: prop, parametros: args })
         });
-        if (!req.ok) throw new Error("Servidor Google indisponível");
-
+        
         const res = await req.json();
-        if (res.status === 'sucesso') {
-           localStorage.setItem('CACHE_LEITURA_' + prop, JSON.stringify(res.dados));
-           if (onSuccess) onSuccess(res.dados);
-        } else {
-           throw new Error(res.mensagem || "Erro na API");
-        }
+        if (res.status === 'sucesso' && onSuccess) onSuccess(res.dados);
+        else if (res.status === 'erro' && onFailure) onFailure(new Error(res.mensagem));
       } catch (e) {
-        console.warn("⚠️ Sem conexão ou link quebrado. Carregando dados offline para:", prop);
-        const cacheSalvo = localStorage.getItem('CACHE_LEITURA_' + prop);
-        if (cacheSalvo && onSuccess) {
-            onSuccess(JSON.parse(cacheSalvo));
-        } else if (onFailure) {
-            onFailure(e);
+        if (isAcaoModificadora) {
+          console.warn("Sem internet. Guardando ação na fila offline:", prop);
+          let filaSync = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
+          filaSync.push({ funcao: prop, parametros: args, id_local: Date.now() });
+          localStorage.setItem('FILA_SYNC_VIAGENS', JSON.stringify(filaSync));
+          
+          if (onSuccess) onSuccess({ status: "salvo_offline" });
+          
+          if(typeof Swal !== 'undefined') {
+             Swal.fire({
+                title: 'Salvo no Aparelho',
+                text: 'Você está offline. O dado será enviado ao Google quando a rede voltar.',
+                icon: 'info',
+                toast: true,
+                position: 'bottom',
+                showConfirmButton: false,
+                timer: 3000
+             });
+          }
+        } else {
+          if (onFailure) onFailure(e);
         }
       }
     };
   }
 });
 
-window.App_ProcessarFilaManual = async function() {
-  const filaSync = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
-  if (filaSync.length === 0) return; 
+// 🔄 FUNÇÃO DE SINCRONIZAÇÃO DA FILA
+window.App_SincronizarDados = async function() {
+  const filaSync = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
+  if (filaSync.length === 0) return true; 
 
-  const icon = document.getElementById('sync-icon');
-  const text = document.getElementById('sync-text');
-  
-  if(icon) icon.className = 'fas fa-sync fa-spin text-warning';
-  if(text) text.innerText = 'A enviar...';
+  if (!navigator.onLine) {
+    if(typeof Swal !== 'undefined') Swal.fire('Sem conexão', 'Conecte-se à internet para enviar os dados pendentes.', 'warning');
+    return false;
+  }
+
+  const btnSync = document.getElementById('icone-sync');
+  if(btnSync) btnSync.classList.add('fa-spin');
 
   let filaRestante = [];
-  let sucessos = 0;
+  let erros = 0;
   for (let i = 0; i < filaSync.length; i++) {
     const item = filaSync[i];
     try {
@@ -177,26 +153,25 @@ window.App_ProcessarFilaManual = async function() {
         body: JSON.stringify({ funcao: item.funcao, parametros: item.parametros })
       });
       const res = await req.json();
-      if (res.status === 'sucesso') sucessos++;
-      else console.warn("Erro no servidor descartado:", res.mensagem);
+      if (res.status !== 'sucesso') throw new Error();
     } catch (err) {
+      erros++;
       filaRestante.push(item); 
     }
   }
 
-  localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(filaRestante));
-  if (typeof SyncAPP_atualizarInterface === 'function') SyncAPP_atualizarInterface();
-
-  if (filaRestante.length === 0) {
-    if(typeof Swal !== 'undefined') Swal.fire('Tudo Salvo!', 'Dados guardados na nuvem.', 'success');
+  localStorage.setItem('FILA_SYNC_VIAGENS', JSON.stringify(filaRestante));
+  if(btnSync) btnSync.classList.remove('fa-spin');
+  if (erros === 0) {
+    if(typeof Swal !== 'undefined') Swal.fire({title: 'Sincronizado!', icon: 'success', toast: true, position: 'top-end', timer: 2000, showConfirmButton: false});
+    return true;
   } else {
-    if(typeof Swal !== 'undefined') Swal.fire('Aviso', 'A internet falhou a meio. Ficaram ' + filaRestante.length + ' pendentes.', 'warning');
-  }
-
-  if (sucessos > 0 && typeof window.Api_buscarDados === 'function') {
-      window.Api_buscarDados(true);
+    if(typeof Swal !== 'undefined') Swal.fire('Aviso', 'Alguns dados não puderam ser enviados. Tentaremos novamente depois.', 'warning');
+    return false;
   }
 };
+
+window.addEventListener('online', App_SincronizarDados);
 /* ================================================================= */
 
 // =======================================================
