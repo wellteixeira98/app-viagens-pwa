@@ -1,7 +1,7 @@
-/* App Build: 20260326_1352 */
+/* App Build: 20260326_1401 */
 
 /* =================================================================
- * 🤖 TRADUTOR PWA + NAVEGAÇÃO NATIVA (DOUBLE BACK TO EXIT)
+ * 🤖 TRADUTOR PWA + NAVEGAÇÃO NATIVA E SYNC INTELIGENTE
  * ================================================================= */
 const API_URL = "https://script.google.com/macros/s/AKfycbzvpFO4PVEYqTvy3B4cPuQhwDhKiJz9RSTYrJpRIr7VXktDf-IFkuMp6_LYbYGl6a0MBg/exec";
 
@@ -129,44 +129,61 @@ window.google.script.run = new Proxy(window.google.script.run, {
   }
 });
 
-// 🔄 FUNÇÃO DE SINCRONIZAÇÃO DA FILA
+// 🔄 FUNÇÃO DE SINCRONIZAÇÃO DA FILA (COM PROTEÇÃO ANTI-LOOP)
 window.App_SincronizarDados = async function() {
   const filaSync = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
-  if (filaSync.length === 0) return true; 
-
-  if (!navigator.onLine) {
-    if(typeof Swal !== 'undefined') Swal.fire('Sem conexão', 'Conecte-se à internet para enviar os dados pendentes.', 'warning');
-    return false;
+  if (filaSync.length === 0) {
+     if (typeof SyncAPP_atualizarInterface === 'function') SyncAPP_atualizarInterface();
+     return true; 
   }
+
+  if (!navigator.onLine) return false;
 
   const btnSync = document.getElementById('icone-sync');
   if(btnSync) btnSync.classList.add('fa-spin');
 
   let filaRestante = [];
-  let erros = 0;
+  let errosFatais = 0;
+
   for (let i = 0; i < filaSync.length; i++) {
     const item = filaSync[i];
     try {
+      // 1. Tenta enviar para o backend
       const req = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ funcao: item.funcao, parametros: item.parametros })
       });
+      
       const res = await req.json();
-      if (res.status !== 'sucesso') throw new Error();
+      
+      // 2. A MÁGICA: Se o Google retornar um erro lógico (ex: falta de dados), nós DESCARTAMOS a ação.
+      if (res.status === 'erro') {
+         console.warn("Item corrompido descartado da fila:", res.mensagem);
+         errosFatais++;
+      }
+
     } catch (err) {
-      erros++;
+      // 3. ERRO DE REDE: Se a internet cair a meio, nós mantemos na fila para tentar depois.
+      console.log("Falha de rede. Mantendo o item na fila.");
       filaRestante.push(item); 
     }
   }
 
+  // 4. Salva apenas os itens que sofreram erro de internet
   localStorage.setItem('FILA_SYNC_VIAGENS', JSON.stringify(filaRestante));
+  
   if(btnSync) btnSync.classList.remove('fa-spin');
-  if (erros === 0) {
+  if (typeof SyncAPP_atualizarInterface === 'function') SyncAPP_atualizarInterface();
+
+  // 5. Feedback amigável para o utilizador
+  if (filaRestante.length === 0 && errosFatais === 0) {
     if(typeof Swal !== 'undefined') Swal.fire({title: 'Sincronizado!', icon: 'success', toast: true, position: 'top-end', timer: 2000, showConfirmButton: false});
     return true;
+  } else if (errosFatais > 0) {
+    if(typeof Swal !== 'undefined') Swal.fire('Limpeza Automática', 'Alguns itens antigos corrompidos foram eliminados do cache.', 'info');
+    return true; 
   } else {
-    if(typeof Swal !== 'undefined') Swal.fire('Aviso', 'Alguns dados não puderam ser enviados. Tentaremos novamente depois.', 'warning');
     return false;
   }
 };
@@ -3268,96 +3285,15 @@ function Mapa_centralizarUsuario() {
 
 
 /**
- * 🔄 MOTOR DE SINCRONIZAÇÃO (SYNC ENGINE) - OFFLINE FIRST
+ * 🔄 MOTOR DE SINCRONIZAÇÃO (SYNC ENGINE) - UNIFICADO E INTELIGENTE
  * Arquivo: 21_Js_SyncAPP.html
- * Missão: Gerir a fila de ações locais e sincronizar com o backend em background.
+ * Missão: Gerir a fila de ações locais, evitar loops infinitos e manter a UI atualizada.
  */
 
-const SYNCAPP_STORAGE_KEY = 'WanderlogClone_SyncQueue';
-let SyncAPP_isSyncing = false;
+// 1. CHAVE UNIFICADA COM O PROXY DO PWA
+const SYNCAPP_STORAGE_KEY = 'FILA_SYNC_VIAGENS'; 
 
-// =========================================================================
-// 1. ADICIONA UMA AÇÃO À FILA (O utilizador fez algo na App)
-// =========================================================================
-function SyncAPP_adicionarAcao(tipoAcao, payload) {
-  // Cria o "envelope" com a ação, os dados e a data/hora exata do telemóvel
-  const novaAcao = {
-    id_interna: 'sync_' + new Date().getTime() + '_' + Math.random().toString(36).substr(2, 5),
-    tipo: tipoAcao, // ex: 'CRIAR_GASTO', 'EDITAR_ATIVIDADE', 'EXCLUIR_REGISTRO'
-    dados: payload,
-    timestamp_local: new Date().toISOString() // Fundamental para Last-Write-Wins
-  };
-
-  // Vai buscar a fila atual ao localStorage do telemóvel
-  let filaAtual = JSON.parse(localStorage.getItem(SYNCAPP_STORAGE_KEY) || '[]');
-  filaAtual.push(novaAcao);
-  
-  // Guarda a fila atualizada no telemóvel
-  localStorage.setItem(SYNCAPP_STORAGE_KEY, JSON.stringify(filaAtual));
-  
-  // Atualiza imediatamente o ícone da nuvem e tenta despachar o envelope
-  SyncAPP_atualizarInterface();
-  SyncAPP_processarFila();
-}
-
-
-// =========================================================================
-// 2. PROCESSA A FILA (O "Carteiro Invisível" em background)
-// =========================================================================
-function SyncAPP_processarFila() {
-  // Se já estiver a enviar algo ou não houver internet, aborta silenciosamente.
-  if (SyncAPP_isSyncing || !navigator.onLine) {
-    SyncAPP_atualizarInterface();
-    return;
-  }
-
-  // Vai buscar a mochila de ações ao cofre do telemóvel
-  let filaAtual = JSON.parse(localStorage.getItem(SYNCAPP_STORAGE_KEY) || '[]');
-  
-  // Se a fila estiver vazia, missão cumprida!
-  if (filaAtual.length === 0) {
-    SyncAPP_atualizarInterface();
-    return; 
-  }
-
-  // Bloqueia novos envios paralelos para não duplicar requisições
-  SyncAPP_isSyncing = true;
-  SyncAPP_atualizarInterface();
-
-  // Pega na primeira ação da fila (a mais antiga)
-  const acao = filaAtual[0];
-  console.log('🔄 SyncAPP: Fila ativada. Ação na mochila:', acao.tipo);
-
-  // 🌟 MENTORIA (FASE 2): 
-  // Ocultamos a chamada ao backend temporariamente para não disparar 
-  // o Proxy Offline do teu App. O carteiro apenas guarda na fila com segurança!
-  /* google.script.run
-    .withSuccessHandler(function(resposta) {
-      let filaRecente = JSON.parse(localStorage.getItem(SYNCAPP_STORAGE_KEY) || '[]');
-      filaRecente = filaRecente.filter(item => item.id_interna !== acao.id_interna);
-      localStorage.setItem(SYNCAPP_STORAGE_KEY, JSON.stringify(filaRecente));
-      SyncAPP_isSyncing = false;
-      SyncAPP_processarFila(); 
-    })
-    .withFailureHandler(function(erro) {
-      console.warn('⚠️ SyncAPP: Falha temporária ao sincronizar.', erro);
-      SyncAPP_isSyncing = false;
-      SyncAPP_atualizarInterface();
-    })
-    .Backend_ReceberAcaoSync(acao); 
-  */
-
-  // Simula que o carteiro fez a verificação, para manter a interface viva (ícone a girar e parar)
-  setTimeout(() => {
-    SyncAPP_isSyncing = false;
-    SyncAPP_atualizarInterface();
-  }, 500);
-}
-
-
-// =========================================================================
-// 3. GESTÃO DA INTERFACE (O Ícone da Nuvem no Header)
-// =========================================================================
+// 2. FUNÇÃO VISUAL: Atualiza os ícones e textos
 function SyncAPP_atualizarInterface() {
   const icon = document.getElementById('sync-icon');
   const text = document.getElementById('sync-text');
@@ -3365,40 +3301,58 @@ function SyncAPP_atualizarInterface() {
   // Se a UI ainda não estiver renderizada (ex: ecrã de login), ignora.
   if (!icon || !text) return;
 
+  // Lê a fila correta e unificada
   let filaAtual = JSON.parse(localStorage.getItem(SYNCAPP_STORAGE_KEY) || '[]');
-
+  
   if (!navigator.onLine) {
     icon.className = 'fas fa-cloud-slash text-danger';
     text.innerText = filaAtual.length > 0 ? `${filaAtual.length} p/ Enviar (Offline)` : 'Offline';
     text.style.color = 'var(--danger)';
-  } else if (SyncAPP_isSyncing) {
-    icon.className = 'fas fa-sync fa-spin text-accent';
-    text.innerText = `A guardar ${filaAtual.length}...`;
-    text.style.color = 'var(--accent)';
   } else if (filaAtual.length > 0) {
-    icon.className = 'fas fa-cloud-upload-alt text-warning';
-    text.innerText = `${filaAtual.length} Pendentes`;
+    // Mostra que há itens pendentes e a tentar subir
+    icon.className = 'fas fa-sync fa-spin text-warning';
+    text.innerText = `A sincronizar ${filaAtual.length}...`;
     text.style.color = '#f39c12';
+    
+    // Tenta forçar a sincronização silenciosamente se detetar algo parado
+    if (typeof window.App_SincronizarDados === 'function') {
+      window.App_SincronizarDados();
+    }
   } else {
     icon.className = 'fas fa-cloud text-success';
-    text.innerText = 'Guardado';
+    text.innerText = 'Sincronizado';
     text.style.color = '#27ae60';
   }
 }
 
+// 3. VÁLVULA DE ESCAPE (Botão de Pânico)
+// Criamos uma função global para limpar dados corrompidos
+window.SyncAPP_LimparFilaMorta = function() {
+  localStorage.removeItem(SYNCAPP_STORAGE_KEY);
+  localStorage.removeItem('WanderlogClone_SyncQueue'); // Apaga também a fila antiga que causou o bug
+  SyncAPP_atualizarInterface();
+  if (typeof Swal !== 'undefined') {
+    Swal.fire('Cache Limpo!', 'A fila de sincronização fantasma foi eliminada.', 'success');
+  }
+};
 
-// =========================================================================
-// 4. INICIALIZAÇÃO E LISTENERS (Gatilhos Automáticos)
-// =========================================================================
-// Deteta reações do sistema operativo ao ligar/desligar o Wi-Fi ou Dados Móveis
-window.addEventListener('online', SyncAPP_processarFila);
+// 4. ATIVAR O "BOTÃO DE PÂNICO" NA INTERFACE
+// Se o utilizador tocar 2 vezes rápidas no indicador "Sincronizado/Pendente", a fila é forçada a limpar
+document.addEventListener("DOMContentLoaded", () => {
+  const indicador = document.getElementById('sync-indicator');
+  if (indicador) {
+    indicador.ondblclick = window.SyncAPP_LimparFilaMorta;
+    indicador.style.cursor = "pointer"; // Mostra ao utilizador que é clicável
+  }
+});
+
+// 5. INICIALIZAÇÃO E LISTENERS (Gatilhos Automáticos)
+window.addEventListener('online', () => {
+  SyncAPP_atualizarInterface();
+  if (typeof window.App_SincronizarDados === 'function') window.App_SincronizarDados();
+});
 window.addEventListener('offline', SyncAPP_atualizarInterface);
 
-// Tenta sincronizar automaticamente a cada 10 segundos 
-// (Garante que nada fica preso se houver uma falha silenciosa de rede)
-setInterval(SyncAPP_processarFila, 10000);
-
-// Força uma verificação 2 segundos após o carregamento inicial da App
-setTimeout(SyncAPP_processarFila, 2000);
-
+// Mantém a interface visual sempre atualizada a cada 3 segundos
+setInterval(SyncAPP_atualizarInterface, 3000);
 
