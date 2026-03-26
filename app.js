@@ -1,9 +1,9 @@
-/* App Build: 20260326_1451 */
+/* App Build: 20260326_1455 */
 
 /* =================================================================
  * 🤖 TRADUTOR PWA + OPTIMISTIC UI AVANÇADO + CACHE DE FERRO
  * ================================================================= */
-const API_URL = "https://script.google.com/macros/s/AKfycbw_L3HYd-LlpxKObn60If0lb20LG0jX7eZxxHrQYgrV/dev";
+const API_URL = "https://script.google.com/macros/s/AKfycbw_L3HYd-LlpxKObn60If0lb20LG0jX7eZxxHrQYgrV/exec";
 const SYNC_QUEUE_KEY = 'VIAGENS_MANUAL_QUEUE';
 
 window.App_ModaisAbertos = [];
@@ -66,7 +66,6 @@ window.google = {
 
 window.google.script.run = new Proxy(window.google.script.run, {
   get(target, prop) {
-    // Evita falsos positivos com Promises nativas
     if (prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
     if (prop in target) return target[prop];
 
@@ -129,24 +128,21 @@ window.google.script.run = new Proxy(window.google.script.run, {
          localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(filaSync));
          if (typeof SyncAPP_atualizarInterface === 'function') SyncAPP_atualizarInterface();
          if (onSuccess) setTimeout(() => onSuccess({ status: "sucesso_local" }), 50); 
-         return; 
+         return;
       }
 
       // 🔍 2. LEITURA: Busca do Google, mas NUNCA trava se falhar (Usa o Cache)
       try {
         if (!navigator.onLine) throw new Error("offline");
-        
         const req = await fetch(API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
           body: JSON.stringify({ funcao: prop, parametros: args })
         });
-        
         if (!req.ok) throw new Error("Servidor Google indisponível");
 
         const res = await req.json();
         if (res.status === 'sucesso') {
-           // Guarda no Cache de Segurança
            localStorage.setItem('CACHE_LEITURA_' + prop, JSON.stringify(res.dados));
            if (onSuccess) onSuccess(res.dados);
         } else {
@@ -156,13 +152,11 @@ window.google.script.run = new Proxy(window.google.script.run, {
         console.warn("⚠️ Sem conexão ou link quebrado. Carregando dados offline para:", prop);
         const cacheSalvo = localStorage.getItem('CACHE_LEITURA_' + prop);
         
-        // Salva a App de ficar presa na tela de Loading!
+        // 🛡️ CORREÇÃO 2: Trata a falha corretamente devolvendo o erro para o App, em vez de uma array vazia que quebrava o sistema.
         if (cacheSalvo && onSuccess) {
             onSuccess(JSON.parse(cacheSalvo));
-        } else if (onSuccess) {
-            onSuccess([]); // Devolve um array vazio para forçar o ecrã a abrir
         } else if (onFailure) {
-            onFailure(e);
+            onFailure(e); // O App agora entende que falhou e carrega o cenário offline adequadamente.
         }
       }
     };
@@ -182,7 +176,6 @@ window.App_ProcessarFilaManual = async function() {
 
   let filaRestante = [];
   let sucessos = 0;
-
   for (let i = 0; i < filaSync.length; i++) {
     const item = filaSync[i];
     try {
