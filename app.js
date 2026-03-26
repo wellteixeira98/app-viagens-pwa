@@ -267,19 +267,19 @@ window.addEventListener('popstate', function(event) {
  * Proteção de Optimistic UI e Gerenciamento de Cache Offline.
  */
 function Api_buscarDados(isBackgroundSync = false) {
-  const overlay = document.getElementById('loading-overlay'); // [cite: 67, 147]
+  const overlay = document.getElementById('loading-overlay');
   
-  // 1. Controle visual: só exibe o carregamento se não for uma atualização silenciosa [cite: 282, 283]
+  // 1. Controle visual: só exibe o carregamento se não for uma atualização silenciosa
   if (!isBackgroundSync && overlay) {
     overlay.style.display = 'flex';
   }
 
   google.script.run
     .withSuccessHandler(dados => {
-      // Guarda uma cópia de segurança de todos os dados recebidos [cite: 284]
+      // Guarda uma cópia de segurança de todos os dados recebidos do servidor
       try { localStorage.setItem('CACHE_VIAGENS', JSON.stringify(dados)); } catch(e) {}
       
-      // Atualiza as configurações globais do app [cite: 269, 284]
+      // Atualiza as configurações e categorias globais do app
       ESTADO_APP.config.viagens = dados.viagens;
       ESTADO_APP.config.viagensInfo = dados.viagensInfo;
       ESTADO_APP.config.categoriasRoteiro = dados.categoriasRoteiro;
@@ -288,13 +288,12 @@ function Api_buscarDados(isBackgroundSync = false) {
       /**
        * 🛡️ PROTEÇÃO OPTIMISTIC UI (CRÍTICO)
        * Se o usuário criou gastos ou atividades offline, eles estão na FILA_SYNC_VIAGENS.
-       * Não podemos deixar que os dados "limpos" do servidor apaguem o que o usuário 
-       * acabou de lançar no celular[cite: 10, 11, 12].
+       * Verificamos a fila antes de aceitar os dados do banco para evitar rollbacks visuais.
        */
-      const filaPendente = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]'); // [cite: 78, 1019]
+      const filaPendente = JSON.parse(localStorage.getItem('FILA_SYNC_VIAGENS') || '[]');
       
       if (filaPendente.length > 0) {
-         // Se há itens esperando para subir, mantemos a nossa versão local da "verdade" [cite: 12, 845]
+         // Se há itens esperando para subir, mantemos a nossa versão local da "verdade"
          const cacheLocalInterativo = localStorage.getItem('DADOS_VIAGEM_CACHE');
          if (cacheLocalInterativo) {
             ESTADO_APP.dadosBD = JSON.parse(cacheLocalInterativo);
@@ -302,59 +301,65 @@ function Api_buscarDados(isBackgroundSync = false) {
             ESTADO_APP.dadosBD = dados.bd;
          }
       } else {
-         // Se a fila está vazia, o servidor é a fonte da verdade mais atualizada [cite: 284]
+         // Se a fila está vazia, o servidor é a fonte da verdade mais atualizada
          ESTADO_APP.dadosBD = dados.bd;
-         // Sincroniza o cache local com a versão limpa do servidor [cite: 12]
+         // Sincroniza o cache local de trabalho com a versão limpa do servidor
          localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(dados.bd)); 
       }
 
-      // Define a viagem ativa caso ainda não tenha sido selecionada [cite: 284]
+      // Define a viagem ativa caso ainda não tenha sido selecionada
       if (!ESTADO_APP.viagemAtual && dados.viagens.length > 0) {
         ESTADO_APP.viagemAtual = dados.viagens[0];
         localStorage.setItem('VIAGEM_ATIVA', ESTADO_APP.viagemAtual);
       }
 
-      // Atualiza todas as telas (Roteiro, Gastos, Mala) instantaneamente [cite: 284, 306]
+      // Atualiza todas as telas (Roteiro, Gastos, Mala) instantaneamente
       UI_renderizarInterface();
 
-      // Esconde o overlay caso ele tenha sido exibido [cite: 284]
+      // Esconde o carregamento
       if (overlay) overlay.style.display = 'none';
     })
     .withFailureHandler(err => {
-      // 🛡️ Blindagem contra erros de rede/offline [cite: 285]
+      // 🛡️ Blindagem contra erros de rede: esconde o loading para não travar a UI
       if (overlay) overlay.style.display = 'none';
       
       /**
-       * 🌟 SILÊNCIO: Se falhar em background (ex: Wi-Fi oscilou), não incomodamos o usuário.
-       * Só mostramos o alerta se ele clicou propositalmente em "Atualizar"[cite: 20, 285].
+       * 🌟 SILÊNCIO: Se falhar em background, não incomodamos o usuário com pop-ups.
+       * Só mostramos o alerta se ele clicou propositalmente em um botão de atualizar.
        */
       if (!isBackgroundSync) {
         Swal.fire({
           title: 'Modo Offline',
-          text: 'Não foi possível conectar ao servidor. Exibindo dados salvos no aparelho.',
+          text: 'Não foi possível conectar ao servidor. Carregando dados do aparelho...',
           icon: 'info',
-          confirmButtonColor: 'var(--accent)' // [cite: 19, 128]
+          confirmButtonColor: 'var(--accent)'
         });
       }
       
-      // Tenta recuperar o que for possível do armazenamento local [cite: 285, 286]
+      // Tenta recuperar os dados do armazenamento local (LocalStorage)
       Api_carregarDoCacheOffline(isBackgroundSync);
     })
-    .Viagens_getDadosIniciais(); // [cite: 35, 200]
+    .Viagens_getDadosIniciais();
 }
 
+/**
+ * 💾 Api_carregarDoCacheOffline
+ * Recupera o estado do App sem necessidade de internet.
+ */
 function Api_carregarDoCacheOffline(isBackgroundSync = false) {
-  const cacheBase = localStorage.getItem('CACHE_VIAGENS'); // O que veio do servidor
-  const cacheLocal = localStorage.getItem('DADOS_VIAGEM_CACHE'); // O que tu mexeste no telemóvel
+  const cacheBase = localStorage.getItem('CACHE_VIAGENS');      // Cópia da estrutura da última conexão
+  const cacheLocal = localStorage.getItem('DADOS_VIAGEM_CACHE'); // Registros de gastos/atividades locais
 
   if (cacheBase) {
     const dados = JSON.parse(cacheBase);
+    
+    // Recupera categorias e infos de viagem do cache
     ESTADO_APP.config.viagens = dados.viagens;
     ESTADO_APP.config.viagensInfo = dados.viagensInfo;
     ESTADO_APP.config.categoriasRoteiro = dados.categoriasRoteiro;
     ESTADO_APP.config.categoriasChecklist = dados.categoriasChecklist; 
     
-    // 🛡️ MÁGICA: Prioriza o cache local (onde estão os teus gastos pendentes)
+    // 🛡️ PRIORIDADE LOCAL: Usa os dados que contêm os gastos pendentes de envio
     if (cacheLocal) {
         ESTADO_APP.dadosBD = JSON.parse(cacheLocal);
     } else {
@@ -363,8 +368,9 @@ function Api_carregarDoCacheOffline(isBackgroundSync = false) {
     
     UI_renderizarInterface();
   } else {
+    // Se não houver absolutamente nada salvo no celular
     if (!isBackgroundSync) {
-        Swal.fire('Erro', 'Você está sem internet e não possui dados salvos no celular.', 'error');
+        Swal.fire('Erro Crítico', 'Você está sem internet e não possui dados salvos no celular.', 'error');
     }
   }
 }
@@ -2729,20 +2735,32 @@ function Gasto_mascararValor(input) {
 /**
  * 🚀 Gasto_salvar (VERSÃO PWA NATIVA / LOCAL-FIRST)
  * Estabilizada: UI imediata e integração nativa com o Proxy de Sincronização.
+ * * OBJETIVO: Garantir que o app funcione sem internet, salvando no aparelho
+ * primeiro e sincronizando com o Google Sheets depois.
  */
 function Gasto_salvar() {
+  // --- 1. COLETA DE DADOS DO FORMULÁRIO ---
   const valorStr = document.getElementById('gasto-valor').value;
   const descricao = document.getElementById('gasto-descricao').value.trim();
   const categoria = document.getElementById('gasto-categoria').value;
   const vinculoSelecionado = document.getElementById('gasto-vinculo').value;
   const idEdicao = document.getElementById('gasto-id').value;
 
+  // --- 2. VALIDAÇÃO DE SEGURANÇA ---
   if (!valorStr || !descricao || !categoria) {
-    return Swal.fire('Opa!', 'Preencha o Valor, a Descrição e a Categoria.', 'warning');
+    return Swal.fire({
+      title: 'Opa!',
+      text: 'Preencha o Valor, a Descrição e a Categoria.',
+      icon: 'warning',
+      confirmButtonColor: 'var(--accent)'
+    });
   }
 
+  // --- 3. TRATAMENTO MATEMÁTICO ---
+  // Converte "1.250,50" para 1250.50 para cálculos corretos
   const valorMatematico = parseFloat(valorStr.replace(/\./g, "").replace(",", ".")) || 0;
 
+  // Lógica para herdar a data da atividade (ex: Hotel) se o gasto estiver vinculado a ela
   let dataFinal = document.getElementById('gasto-data').value;
   if (vinculoSelecionado) {
     const atividadePai = ESTADO_APP.dadosBD.find(i => 
@@ -2753,6 +2771,7 @@ function Gasto_salvar() {
     if (atividadePai && atividadePai['Data_Hora']) dataFinal = atividadePai['Data_Hora'].split(' ')[0];
   }
 
+  // --- 4. PREPARAÇÃO DO OBJETO (PAYLOAD) ---
   const isNovo = (!idEdicao || idEdicao === '');
   const idFinal = isNovo ? 'temp_gasto_' + new Date().getTime() : idEdicao;
 
@@ -2767,80 +2786,53 @@ function Gasto_salvar() {
     Valor: valorMatematico, 
     Atividade_Vinculada: vinculoSelecionado, 
     Usuario: "Admin",
-    Integridade: 'Pendente'
+    Integridade: 'Pendente' // Define que este dado ainda não foi confirmado pela nuvem
   };
 
-  // 🛡️ PASSO 1: ATUALIZAÇÃO IMEDIATA (Optimistic UI)
+  // --- 🛡️ PASSO 1: OPTIMISTIC UI (ATUALIZAÇÃO IMEDIATA) ---
+  // Injeta o dado na memória RAM do app antes de qualquer resposta do servidor
   if (isNovo) {
-    ESTADO_APP.dadosBD.push(payload); [cite: 1890]
+    ESTADO_APP.dadosBD.push(payload);
   } else {
-    const index = ESTADO_APP.dadosBD.findIndex(i => String(i.ID) === String(idFinal)); [cite: 1891]
+    const index = ESTADO_APP.dadosBD.findIndex(i => String(i.ID) === String(idFinal));
     if (index > -1) ESTADO_APP.dadosBD[index] = payload;
   }
 
-  // 🛡️ PASSO 2: SALVAR NO CACHE (Evita perda de dados ao recarregar)
-  localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(ESTADO_APP.dadosBD)); [cite: 1892]
+  // --- 🛡️ PASSO 2: PERSISTÊNCIA EM CACHE LOCAL ---
+  // Grava no armazenamento físico do telemóvel para não perder dados se o PWA for fechado
+  localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(ESTADO_APP.dadosBD));
 
-  // 🛡️ PASSO 3: FECHAR MODAL E RENDERIZAR TELA (A mágica acontece aqui)
-  Gasto_fecharModal(); [cite: 1894]
+  // --- 🛡️ PASSO 3: LIMPEZA DA INTERFACE ---
+  // Fecha o formulário e redesenha a lista de gastos na hora
+  Gasto_fecharModal();
   if (typeof UI_renderizarGastos === 'function') UI_renderizarGastos(); 
   if (typeof UI_renderizarRoteiro === 'function') UI_renderizarRoteiro();
 
-  // 🛡️ PASSO 4: FEEDBACK VISUAL
-  Swal.fire({ title: 'Salvo localmente!', icon: 'success', toast: true, position: 'top-end', timer: 1500, showConfirmButton: false });
+  // --- 🛡️ PASSO 4: FEEDBACK AO UTILIZADOR ---
+  Swal.fire({ 
+    title: 'Salvo localmente!', 
+    icon: 'success', 
+    toast: true, 
+    position: 'top-end', 
+    timer: 1500, 
+    showConfirmButton: false 
+  });
   if (typeof UI_vibrar === 'function') UI_vibrar(20);
 
-  // 🛡️ PASSO 5: SINCRONIZAÇÃO EM BACKGROUND (Usa o Proxy Mágico)
-  // Removemos o SyncAPP_adicionarAcao que estava a causar o erro!
+  // --- 🛡️ PASSO 5: SINCRONIZAÇÃO ASSÍNCRONA (BACKGROUND) ---
+  // O Proxy Tradutor (20_Ferramentas_Dev) interceta isto se estiveres offline
   google.script.run
     .withSuccessHandler(() => {
-       console.log("Sincronizado!");
-       Api_buscarDados(true); // Limpa a flag 'Pendente' silenciosamente [cite: 1332]
+       console.log("✅ Sincronizado com o servidor!");
+       // Recarrega os dados em silêncio para limpar as marcas de 'Pendente'
+       Api_buscarDados(true); 
     })
-    .withFailureHandler(err => console.warn("Offline: Ação guardada na fila.")) [cite: 2063]
+    .withFailureHandler(err => {
+       console.warn("⚠️ Modo Offline: Ação guardada na fila de espera automática.");
+    })
     .Viagens_salvarRegistro(payload, []);
 }
 
-/**
- * 🚀 Gasto_excluirGasto (VERSÃO LOCAL-FIRST)
- * Remove da tela instantaneamente, mesmo sem rede.
- */
-function Gasto_excluirGasto() {
-  const id = document.getElementById('gasto-id').value;
-  if (!id) return;
-
-  Swal.fire({
-    title: 'Excluir Gasto?', 
-    text: "O valor será removido localmente e sincronizado depois.", 
-    icon: 'warning', 
-    showCancelButton: true, 
-    confirmButtonColor: '#e74c3c', 
-    confirmButtonText: 'Sim, excluir!', 
-    cancelButtonText: 'Cancelar'
-  }).then((result) => {
-    if (result.isConfirmed) {
-      
-      // 1. REMOÇÃO OTIMISTA DA MEMÓRIA [cite: 11]
-      ESTADO_APP.dadosBD = ESTADO_APP.dadosBD.filter(i => String(i.ID) !== String(id));
-      localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(ESTADO_APP.dadosBD)); [cite: 12]
-
-      // 2. ATUALIZAÇÃO DA UI IMEDIATA
-      Gasto_fecharModal(); 
-      if (typeof UI_renderizarGastos === 'function') UI_renderizarGastos(); 
-      if (typeof UI_renderizarRoteiro === 'function') UI_renderizarRoteiro();
-
-      // 3. FEEDBACK
-      Swal.fire({ title: 'Excluído!', icon: 'success', toast: true, position: 'top-end', timer: 2000, showConfirmButton: false });
-      if (typeof UI_vibrar === 'function') UI_vibrar(20);
-
-      // 4. COMANDO PARA O SERVIDOR
-      google.script.run
-        .withSuccessHandler(() => Api_buscarDados(true))
-        .withFailureHandler(err => console.warn("Exclusão em fila offline"))
-        .Viagens_excluirRegistro(id); [cite: 243]
-    }
-  });
-}
 
 
 /**
