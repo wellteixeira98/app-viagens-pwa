@@ -1,13 +1,13 @@
-/* App Build: 20260326_1501 */
+/* App Build: 20260326_1506 */
 
 /* =================================================================
  * 🤖 TRADUTOR PWA + OPTIMISTIC UI AVANÇADO + CACHE DE FERRO
  * ================================================================= */
-const API_URL = "https://script.google.com/macros/s/AKfycbw_L3HYd-LlpxKObn60If0lb20LG0jX7eZxxHrQYgrV/exec";
-const SYNC_QUEUE_KEY = 'VIAGENS_MANUAL_QUEUE';
+var API_URL = "https://script.google.com/macros/s/AKfycbw_L3HYd-LlpxKObn60If0lb20LG0jX7eZxxHrQYgrV/exec";
+var SYNC_QUEUE_KEY = 'VIAGENS_MANUAL_QUEUE';
+var tentouSair = false;
 
-window.App_ModaisAbertos = [];
-let tentouSair = false;
+window.App_ModaisAbertos = window.App_ModaisAbertos || [];
 history.pushState({ telaPrincipal: true }, "");
 
 window.App_AbrirTela = function(idModal, tipo = 'block') {
@@ -54,13 +54,11 @@ window.addEventListener('popstate', function(event) {
   }
 });
 
-window.google = {
-  script: {
-    run: {
-      withSuccessHandler: function(onSuccess) { this._onSuccess = onSuccess; return this; },
-      withFailureHandler: function(onFailure) { this._onFailure = onFailure; return this; }
-    }
-  }
+window.google = window.google || {};
+window.google.script = window.google.script || {};
+window.google.script.run = {
+  withSuccessHandler: function(onSuccess) { this._onSuccess = onSuccess; return this; },
+  withFailureHandler: function(onFailure) { this._onFailure = onFailure; return this; }
 };
 
 window.google.script.run = new Proxy(window.google.script.run, {
