@@ -1,12 +1,11 @@
-/* App Build: 20260326_1431 */
+/* App Build: 20260326_1436 */
 
 /* =================================================================
- * 🤖 TRADUTOR PWA + OPTIMISTIC UI AVANÇADO + MANUAL SYNC
+ * 🤖 TRADUTOR PWA + OPTIMISTIC UI AVANÇADO + CACHE DE FERRO
  * ================================================================= */
-const API_URL = "https://script.google.com/macros/s/AKfycbzvpFO4PVEYqTvy3B4cPuQhwDhKiJz9RSTYrJpRIr7VXktDf-IFkuMp6_LYbYGl6a0MBg/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbw_L3HYd-LlpxKObn60If0lb20LG0jX7eZxxHrQYgrV/dev";
 const SYNC_QUEUE_KEY = 'VIAGENS_MANUAL_QUEUE';
 
-// --- CONTROLE DO BOTÃO VOLTAR (SMART NAVIGATION) ---
 window.App_ModaisAbertos = [];
 let tentouSair = false;
 history.pushState({ telaPrincipal: true }, "");
@@ -36,18 +35,15 @@ window.addEventListener('popstate', function(event) {
     history.pushState(event.state, ""); 
     return;
   }
-  
   if (window.App_ModaisAbertos.length > 0) {
     const ultimoModal = window.App_ModaisAbertos.pop();
     const el = document.getElementById(ultimoModal);
     if (el) el.style.display = 'none';
     return;
   }
-
   if (!tentouSair) {
     tentouSair = true;
     history.pushState({ telaPrincipal: true }, ""); 
-    
     if(typeof Swal !== 'undefined') {
       Swal.fire({
         title: 'Pressione voltar novamente para sair',
@@ -70,25 +66,25 @@ window.google = {
 
 window.google.script.run = new Proxy(window.google.script.run, {
   get(target, prop) {
+    // Evita falsos positivos com Promises nativas
+    if (prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
     if (prop in target) return target[prop];
+
     return async function(...args) {
       const onSuccess = target._onSuccess;
       const onFailure = target._onFailure;
       target._onSuccess = null; target._onFailure = null;
 
-      // 🧠 A MÁGICA ACONTECE AQUI: Interceptamos apenas ações de ESCRITA
+      // 🧠 1. ESCRITA: Vai para a fila de sincronização manual
       if (typeof prop === 'string' && (prop.includes('salvar') || prop.includes('excluir') || prop.includes('Toggle'))) {
-         
          let filaSync = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
          
          if (prop === 'Viagens_salvarRegistro') {
             let payload = args[0];
             let isNovo = !payload.ID || String(payload.ID).startsWith('temp_');
             
-            // 1. Gera ID temporário se não tiver
             if (isNovo && !payload.ID) payload.ID = 'temp_' + Date.now();
             
-            // 2. Atualiza a memória RAM do ecrã instantaneamente
             if (window.ESTADO_APP && window.ESTADO_APP.dadosBD) {
                let idx = window.ESTADO_APP.dadosBD.findIndex(i => i.ID === payload.ID);
                if (idx > -1) window.ESTADO_APP.dadosBD[idx] = payload;
@@ -98,13 +94,11 @@ window.google.script.run = new Proxy(window.google.script.run, {
                if (typeof window.UI_renderizarInterface === 'function') window.UI_renderizarInterface();
             }
 
-            // 3. Lógica Inteligente para a Fila de Envio (Nuvem)
             if (isNovo) {
                 let payloadBackend = JSON.parse(JSON.stringify(payload));
-                payloadBackend.ID = ""; // Deixa vazio para o Google criar o ID real na nuvem
+                payloadBackend.ID = ""; 
                 filaSync.push({ funcao: prop, parametros: [payloadBackend, args[1]], id_local: payload.ID });
             } else if (String(payload.ID).startsWith('temp_')) {
-                // Editou algo offline que ainda nem subiu! Atualizamos o pacote na fila.
                 let itemFila = filaSync.find(i => i.id_local === payload.ID);
                 if (itemFila) {
                     let payloadBackend = JSON.parse(JSON.stringify(payload));
@@ -112,41 +106,33 @@ window.google.script.run = new Proxy(window.google.script.run, {
                     itemFila.parametros[0] = payloadBackend;
                 }
             } else {
-                // Edição de um item antigo real
                 filaSync.push({ funcao: prop, parametros: args, id_local: Date.now() });
             }
          }
          else if (prop === 'Viagens_excluirRegistro') {
             let idExcluir = args[0];
-            
-            // Atualiza a UI apagando da memória
             if (window.ESTADO_APP && window.ESTADO_APP.dadosBD) {
                window.ESTADO_APP.dadosBD = window.ESTADO_APP.dadosBD.filter(i => String(i.ID) !== String(idExcluir));
                localStorage.setItem('DADOS_VIAGEM_CACHE', JSON.stringify(window.ESTADO_APP.dadosBD));
                if (typeof window.UI_renderizarInterface === 'function') window.UI_renderizarInterface();
             }
-
-            // Lógica Inteligente para a Fila
             if (String(idExcluir).startsWith('temp_')) {
-                // Apagou algo que nem subiu pra nuvem. Removemos da fila de envio!
                 filaSync = filaSync.filter(i => i.id_local !== idExcluir);
             } else {
                 filaSync.push({ funcao: prop, parametros: args, id_local: Date.now() });
             }
          }
          else {
-             // Outras funções modificadoras genéricas
              filaSync.push({ funcao: prop, parametros: args, id_local: Date.now() });
          }
 
-         // Grava a fila e devolve Sucesso Imediato para a App não travar!
          localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(filaSync));
          if (typeof SyncAPP_atualizarInterface === 'function') SyncAPP_atualizarInterface();
          if (onSuccess) setTimeout(() => onSuccess({ status: "sucesso_local" }), 50); 
          return; 
       }
 
-      // 🔍 AÇÕES DE LEITURA (Abertura do App)
+      // 🔍 2. LEITURA: Busca do Google, mas NUNCA trava se falhar (Usa o Cache)
       try {
         if (!navigator.onLine) throw new Error("offline");
         
@@ -156,11 +142,28 @@ window.google.script.run = new Proxy(window.google.script.run, {
           body: JSON.stringify({ funcao: prop, parametros: args })
         });
         
+        if (!req.ok) throw new Error("Servidor Google indisponível");
+
         const res = await req.json();
-        if (res.status === 'sucesso' && onSuccess) onSuccess(res.dados);
-        else if (res.status === 'erro' && onFailure) onFailure(new Error(res.mensagem));
+        if (res.status === 'sucesso') {
+           // Guarda no Cache de Segurança
+           localStorage.setItem('CACHE_LEITURA_' + prop, JSON.stringify(res.dados));
+           if (onSuccess) onSuccess(res.dados);
+        } else {
+           throw new Error(res.mensagem || "Erro na API");
+        }
       } catch (e) {
-        if (onFailure) onFailure(e);
+        console.warn("⚠️ Sem conexão ou link quebrado. Carregando dados offline para:", prop);
+        const cacheSalvo = localStorage.getItem('CACHE_LEITURA_' + prop);
+        
+        // Salva a App de ficar presa na tela de Loading!
+        if (cacheSalvo && onSuccess) {
+            onSuccess(JSON.parse(cacheSalvo));
+        } else if (onSuccess) {
+            onSuccess([]); // Devolve um array vazio para forçar o ecrã a abrir
+        } else if (onFailure) {
+            onFailure(e);
+        }
       }
     };
   }
@@ -205,7 +208,6 @@ window.App_ProcessarFilaManual = async function() {
     if(typeof Swal !== 'undefined') Swal.fire('Aviso', 'A internet falhou a meio. Ficaram ' + filaRestante.length + ' pendentes.', 'warning');
   }
 
-  // Se teve sucessos, atualiza os dados reais do Google (Substitui os IDs temp_ pelos originais)
   if (sucessos > 0 && typeof window.Api_buscarDados === 'function') {
       window.Api_buscarDados(true);
   }
