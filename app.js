@@ -1,4 +1,4 @@
-/* App Build: 20260326_1426 */
+/* App Build: 20260326_1431 */
 
 /* =================================================================
  * 🤖 TRADUTOR PWA + OPTIMISTIC UI AVANÇADO + MANUAL SYNC
@@ -77,7 +77,7 @@ window.google.script.run = new Proxy(window.google.script.run, {
       target._onSuccess = null; target._onFailure = null;
 
       // 🧠 A MÁGICA ACONTECE AQUI: Interceptamos apenas ações de ESCRITA
-      if (prop.includes('salvar') || prop.includes('excluir') || prop.includes('Toggle')) {
+      if (typeof prop === 'string' && (prop.includes('salvar') || prop.includes('excluir') || prop.includes('Toggle'))) {
          
          let filaSync = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
          
