@@ -1,4 +1,4 @@
-/* App Build: 20260326_1455 */
+/* App Build: 20260326_1501 */
 
 /* =================================================================
  * 🤖 TRADUTOR PWA + OPTIMISTIC UI AVANÇADO + CACHE DE FERRO
@@ -54,7 +54,6 @@ window.addEventListener('popstate', function(event) {
   }
 });
 
-// --- O CÉREBRO LOCAL: PROXY DE COMUNICAÇÃO (OFFLINE FIRST) ---
 window.google = {
   script: {
     run: {
@@ -74,7 +73,6 @@ window.google.script.run = new Proxy(window.google.script.run, {
       const onFailure = target._onFailure;
       target._onSuccess = null; target._onFailure = null;
 
-      // 🧠 1. ESCRITA: Vai para a fila de sincronização manual
       if (typeof prop === 'string' && (prop.includes('salvar') || prop.includes('excluir') || prop.includes('Toggle'))) {
          let filaSync = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
          
@@ -131,7 +129,6 @@ window.google.script.run = new Proxy(window.google.script.run, {
          return;
       }
 
-      // 🔍 2. LEITURA: Busca do Google, mas NUNCA trava se falhar (Usa o Cache)
       try {
         if (!navigator.onLine) throw new Error("offline");
         const req = await fetch(API_URL, {
@@ -151,19 +148,16 @@ window.google.script.run = new Proxy(window.google.script.run, {
       } catch (e) {
         console.warn("⚠️ Sem conexão ou link quebrado. Carregando dados offline para:", prop);
         const cacheSalvo = localStorage.getItem('CACHE_LEITURA_' + prop);
-        
-        // 🛡️ CORREÇÃO 2: Trata a falha corretamente devolvendo o erro para o App, em vez de uma array vazia que quebrava o sistema.
         if (cacheSalvo && onSuccess) {
             onSuccess(JSON.parse(cacheSalvo));
         } else if (onFailure) {
-            onFailure(e); // O App agora entende que falhou e carrega o cenário offline adequadamente.
+            onFailure(e);
         }
       }
     };
   }
 });
 
-// 🔄 FUNÇÃO DO BOTÃO MANUAL DE SINCRONIZAÇÃO
 window.App_ProcessarFilaManual = async function() {
   const filaSync = JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY) || '[]');
   if (filaSync.length === 0) return; 
