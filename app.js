@@ -1,3 +1,4 @@
+/* App Build: 20260326_1352 */
 
 /* =================================================================
  * 🤖 TRADUTOR PWA + NAVEGAÇÃO NATIVA (DOUBLE BACK TO EXIT)
@@ -66,7 +67,6 @@ window.addEventListener('popstate', function(event) {
     // Passados 2 segundos, o utilizador tem de apertar duas vezes novamente
     setTimeout(() => { tentouSair = false; }, 2000);
   }
-  // Se 'tentouSair' for true (clicou a 2ª vez em menos de 2 seg), o código não faz nada e o PWA fecha naturalmente!
 });
 
 // --- PROXY DE COMUNICAÇÃO COM O GOOGLE (OFFLINE FIRST) ---
@@ -144,7 +144,6 @@ window.App_SincronizarDados = async function() {
 
   let filaRestante = [];
   let erros = 0;
-
   for (let i = 0; i < filaSync.length; i++) {
     const item = filaSync[i];
     try {
@@ -163,7 +162,6 @@ window.App_SincronizarDados = async function() {
 
   localStorage.setItem('FILA_SYNC_VIAGENS', JSON.stringify(filaRestante));
   if(btnSync) btnSync.classList.remove('fa-spin');
-
   if (erros === 0) {
     if(typeof Swal !== 'undefined') Swal.fire({title: 'Sincronizado!', icon: 'success', toast: true, position: 'top-end', timer: 2000, showConfirmButton: false});
     return true;
